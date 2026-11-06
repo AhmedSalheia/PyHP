@@ -1,0 +1,11 @@
+#!/bin/sh
+# Blocks direct pushes to protected branches. Bootstrap only: ALLOW_PROTECTED_PUSH=1 git push ...
+[ "$ALLOW_PROTECTED_PUSH" = "1" ] && exit 0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/develop)
+      echo "Blocked: direct push to ${remote_ref#refs/heads/}. Open a PR instead." >&2
+      exit 1 ;;
+  esac
+done
+exit 0

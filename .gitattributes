@@ -1,0 +1,4 @@
+* text=auto
+# Shell hooks must keep LF endings or Git's sh on Windows can't run them.
+.githooks/* text eol=lf
+*.sh text eol=lf

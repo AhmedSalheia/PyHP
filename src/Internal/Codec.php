@@ -1,0 +1,261 @@
+<?php
+
+declare(strict_types=1);
+
+namespace PyHP\Internal;
+
+use Closure;
+use PyHP\Exception\ConversionException;
+use PyHP\Exception\ProtocolException;
+use PyHP\PyObject;
+use PyHP\Session;
+use PyHP\Value\Dict;
+use PyHP\Value\Slice;
+use PyHP\Value\Tuple;
+use stdClass;
+
+/**
+ * Converts values between PHP and the JSON wire format.
+ *
+ * Plain JSON carries null, bools, ints, floats, strings and lists. Everything
+ * else is a "tagged" JSON object: {"$t": "<tag>", ...}. The Python side
+ * (python/pyhp_worker.py) implements the mirror image of these rules.
+ *
+ * @internal
+ */
+final class Codec
+{
+    public const MAX_DEPTH = 256;
+
+    private const JSON_ENCODE_FLAGS = JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE
+        | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION;
+
+    /** @var (Closure(PyObject): array{0: Session, 1: int})|null */
+    private static ?Closure $unwrap = null;
+
+    public function __construct(private readonly Session $session) {}
+
+    /**
+     * @param  array<string, mixed>  $message
+     */
+    public static function toJson(array $message): string
+    {
+        try {
+            return json_encode($message, self::JSON_ENCODE_FLAGS);
+        } catch (\JsonException $error) {
+            throw new ConversionException('Could not encode the request: '.$error->getMessage(), 0, $error);
+        }
+    }
+
+    public static function fromJson(string $json): stdClass
+    {
+        try {
+            $message = json_decode($json, false, self::MAX_DEPTH * 2 + 8, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
+        } catch (\JsonException $error) {
+            throw new ProtocolException('The worker sent invalid JSON: '.$error->getMessage(), 0, $error);
+        }
+        if (! $message instanceof stdClass) {
+            throw new ProtocolException('The worker sent a message that is not a JSON object.');
+        }
+
+        return $message;
+    }
+
+    /**
+     * The id of a proxy, after checking it belongs to this session.
+     */
+    public function refId(PyObject $object): int
+    {
+        [$session, $id] = self::unwrap($object);
+        if ($session !== $this->session) {
+            throw new ConversionException('A Python object proxy from a different session cannot be used here.');
+        }
+
+        return $id;
+    }
+
+    /**
+     * PHP value -> wire value.
+     */
+    public function encode(mixed $value, int $depth = 0): mixed
+    {
+        if ($depth > self::MAX_DEPTH) {
+            throw new ConversionException('The value is nested too deep (more than '.self::MAX_DEPTH.' levels) to send to Python.');
+        }
+
+        return match (true) {
+            $value === null, is_bool($value), is_int($value) => $value,
+            is_float($value) => $this->encodeFloat($value),
+            is_string($value) => $this->encodeString($value),
+            is_array($value) => array_is_list($value)
+                ? array_map(fn (mixed $item): mixed => $this->encode($item, $depth + 1), $value)
+                : $this->encodeDict($value, $depth),
+            $value instanceof PyObject => ['$t' => 'ref', 'id' => $this->refId($value)],
+            $value instanceof Tuple => [
+                '$t' => 'tuple',
+                'v' => array_map(fn (mixed $item): mixed => $this->encode($item, $depth + 1), $value->items),
+            ],
+            $value instanceof Slice => ['$t' => 'slice', 'v' => [$value->start, $value->stop, $value->step]],
+            $value instanceof Dict => $this->encodeDict($value->items, $depth),
+            $value instanceof Closure => throw new ConversionException(
+                'A PHP Closure cannot be passed to Python (callbacks are not supported yet).'
+            ),
+            default => throw new ConversionException(sprintf(
+                'A PHP %s cannot be sent to Python. Send scalars, arrays, Python object proxies, '
+                .'or Py::tuple()/Py::slice()/Py::dict() values.',
+                get_debug_type($value),
+            )),
+        };
+    }
+
+    /**
+     * Named and positional call arguments, split the way Python expects.
+     *
+     * @param  array<array-key, mixed>  $arguments
+     * @return array{args: list<mixed>, kwargs: array<string, mixed>|stdClass}
+     */
+    public function encodeArguments(array $arguments): array
+    {
+        $args = [];
+        $kwargs = [];
+        foreach ($arguments as $key => $argument) {
+            if (is_int($key)) {
+                $args[] = $this->encode($argument);
+            } else {
+                $kwargs[$key] = $this->encode($argument);
+            }
+        }
+
+        // An empty PHP array would be sent as a JSON list; kwargs must be a JSON object.
+        return ['args' => $args, 'kwargs' => $kwargs === [] ? new stdClass : $kwargs];
+    }
+
+    /**
+     * Wire value -> PHP value.
+     */
+    public function decode(mixed $data): mixed
+    {
+        if ($data === null || is_bool($data) || is_int($data) || is_float($data) || is_string($data)) {
+            return $data;
+        }
+        if (is_array($data)) {
+            return array_map(fn (mixed $item): mixed => $this->decode($item), $data);
+        }
+        if (! $data instanceof stdClass) {
+            throw new ProtocolException('Unexpected value on the wire: '.get_debug_type($data));
+        }
+
+        $tag = $data->{'$t'} ?? null;
+        $raw = $data->v ?? null;
+
+        return match ($tag) {
+            'ref' => $this->decodeRef($data),
+            'dict' => $this->decodeDict($raw),
+            'bytes' => $this->decodeBytes($raw),
+            'float' => match ($raw) {
+                'nan' => NAN,
+                'inf' => INF,
+                '-inf' => -INF,
+                default => throw new ProtocolException('Invalid special float on the wire.'),
+            },
+            default => throw new ProtocolException('Unknown value tag on the wire: '.json_encode($tag)),
+        };
+    }
+
+    /**
+     * The session and id behind a proxy.
+     *
+     * @return array{0: Session, 1: int}
+     */
+    public static function unwrap(PyObject $object): array
+    {
+        // Read the proxy's private fields without giving PyObject any public
+        // method that could hide a Python attribute of the same name.
+        self::$unwrap ??= Closure::bind(
+            static fn (PyObject $proxy): array => [$proxy->session, $proxy->id],
+            null,
+            PyObject::class,
+        );
+
+        return (self::$unwrap)($object);
+    }
+
+    /**
+     * @return float|array{'$t': string, v: string}
+     */
+    private function encodeFloat(float $value): float|array
+    {
+        if (is_nan($value)) {
+            return ['$t' => 'float', 'v' => 'nan'];
+        }
+        if (is_infinite($value)) {
+            return ['$t' => 'float', 'v' => $value > 0 ? 'inf' : '-inf'];
+        }
+
+        return $value;
+    }
+
+    /**
+     * Valid UTF-8 becomes a Python str; anything else becomes bytes.
+     *
+     * @return string|array{'$t': string, v: string}
+     */
+    private function encodeString(string $value): string|array
+    {
+        return preg_match('//u', $value) === 1 ? $value : ['$t' => 'bytes', 'v' => base64_encode($value)];
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $items
+     * @return array{'$t': string, v: list<array{0: mixed, 1: mixed}>}
+     */
+    private function encodeDict(array $items, int $depth): array
+    {
+        $pairs = [];
+        foreach ($items as $key => $item) {
+            $pairs[] = [$this->encode($key, $depth + 1), $this->encode($item, $depth + 1)];
+        }
+
+        return ['$t' => 'dict', 'v' => $pairs];
+    }
+
+    private function decodeRef(stdClass $data): PyObject
+    {
+        $id = $data->id ?? null;
+        $type = $data->type ?? null;
+        if (! is_int($id) || ! is_string($type)) {
+            throw new ProtocolException('Invalid object reference on the wire.');
+        }
+
+        return new PyObject($this->session, $id, $type);
+    }
+
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function decodeDict(mixed $pairs): array
+    {
+        if (! is_array($pairs)) {
+            throw new ProtocolException('Invalid dict on the wire.');
+        }
+        $result = [];
+        foreach ($pairs as $pair) {
+            if (! is_array($pair) || count($pair) !== 2 || ! (is_int($pair[0]) || is_string($pair[0]))) {
+                throw new ProtocolException('Invalid dict entry on the wire.');
+            }
+            $result[$pair[0]] = $this->decode($pair[1]);
+        }
+
+        return $result;
+    }
+
+    private function decodeBytes(mixed $raw): string
+    {
+        $bytes = is_string($raw) ? base64_decode($raw, true) : false;
+        if ($bytes === false) {
+            throw new ProtocolException('Invalid bytes value on the wire.');
+        }
+
+        return $bytes;
+    }
+}

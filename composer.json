@@ -1,0 +1,58 @@
+{
+    "name": "ahmedsalheia/pyhp",
+    "description": "Use Python libraries (pandas, NumPy, ...) from PHP through a persistent Python worker and object proxies.",
+    "type": "library",
+    "license": "proprietary",
+    "keywords": [
+        "python",
+        "pandas",
+        "numpy",
+        "interop",
+        "bridge"
+    ],
+    "authors": [
+        {
+            "name": "Ahmed Salheia"
+        }
+    ],
+    "require": {
+        "php": "^8.2"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.18",
+        "pestphp/pest": "^3.0",
+        "phpstan/phpstan": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "PyHP\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PyHP\\Tests\\": "tests/php/"
+        }
+    },
+    "scripts": {
+        "test": [
+            "@putenv XDEBUG_MODE=coverage",
+            "pest --coverage --min=80"
+        ],
+        "analyse": "phpstan analyse",
+        "format": "pint",
+        "check": [
+            "pint --test",
+            "phpstan analyse",
+            "@putenv XDEBUG_MODE=coverage",
+            "pest --coverage --min=80"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
