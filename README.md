@@ -288,6 +288,18 @@ A few `Session` methods (`request()`, `codec()`, `release()`) are public for PyH
 
 * `exec('x = 1')` runs **statements** and returns nothing. `exec('1 + 1')` computes and discards the result.
 * `eval('x + 1')` evaluates **one expression** and returns it. `eval('x = 1')` is a `SyntaxError`.
+* An expression spread over several lines must be wrapped in parentheses, exactly as in a Python file. Without them Python reads each new line as a new statement and fails with *"IndentationError: unexpected indent"*:
+
+  ```php
+  $monthly = $py->eval(<<<'PY'
+      (
+          orders.groupby('month')
+          .agg(revenue=('revenue', 'sum'))
+          .reset_index()
+      )
+      PY);
+  ```
+
 * `print()` inside either produces *output*, not a return value: `eval('print(42)')` returns `null` and prints `42`.
 * `execFile($path)` is like `exec(file_get_contents($path))`, but tracebacks show the real file name and line numbers, the file's `# -*- coding -*-` declaration is honoured, and `__file__` is set while it runs.
 
