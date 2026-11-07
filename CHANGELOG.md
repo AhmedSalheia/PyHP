@@ -15,6 +15,15 @@ All notable changes to PyHP are documented here. The format follows
 - Exception hierarchy, timeouts, crash detection, message size limits.
 - Examples for basics, vars/functions, pandas and NumPy; overhead benchmark.
 
+### Changed
+- Python dicts now travel to PHP as plain JSON objects, and each response says whether it contains any tagged value. Plain results skip PHP's decode pass: copying 100k rows × 4 columns dropped from a 207 MB to a 60 MB memory peak, and from ~1.6 s to ~0.65 s (Linux).
+
+### Fixed
+- Windows start-up took ~650 ms because PHP waits 500 ms whenever it closes a listening socket. The worker now listens (loopback only, until PHP has connected) and PHP connects as a client, authenticating with the token. Workers that nobody connects to exit after `startup_timeout`.
+- A failed start no longer leaks the socket or the temporary log file.
+- A dict that has to stay in Python because its keys collide in PHP no longer leaves references to its values in the worker's registry.
+- On Windows, a missing interpreter no longer leaks a `proc_open()` warning to the application's error handler.
+
 ### Verified
 - Linux: PHP 8.3 / Python 3.13 / pandas 3.0 / NumPy 2.5.
 - Windows: Pest 101/101 (88% coverage), PHPStan max, Pint; worker tests on Python 3.11.
