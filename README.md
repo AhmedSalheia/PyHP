@@ -77,9 +77,13 @@ That design makes some things easy and some things impossible, and it's worth kn
 
 ## Installation
 
-PyHP isn't on Packagist yet. Until then, install it from a local folder.
+**1. Install the package:**
 
-**1. Put the PyHP folder next to your project** (or anywhere), then in your project's `composer.json`:
+```bat
+composer require ahmedsalheia/pyhp
+```
+
+To work on a local copy instead (for example to try changes to PyHP itself), add it as a path repository in your project's `composer.json`:
 
 ```json
 {
@@ -90,10 +94,6 @@ PyHP isn't on Packagist yet. Until then, install it from a local folder.
         "ahmedsalheia/pyhp": "*@dev"
     }
 }
-```
-
-```bat
-composer update ahmedsalheia/pyhp
 ```
 
 **2. Create a virtual environment for your Python libraries** (recommended, so your project's Python packages are isolated):
@@ -816,9 +816,9 @@ The per-call figure is in line with other process-based bridges. In-process embe
 
 | Platform | Status |
 |---|---|
-| **Linux** | ✅ Tested: PHP 8.3, Python 3.13 (pandas 3.0, NumPy 2.5). |
-| **Windows** | 🎯 Primary target, **not yet run.** The design avoids the known Windows pitfalls: sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, `SYSTEMROOT` passed through. The included CI workflow runs the suite on Windows. Treat Windows as unverified until that passes. |
-| **macOS** | Expected to work like Linux; **not tested yet**. GitHub Actions has macOS runners, so CI can test it without a Mac (see [Continuous integration](#continuous-integration)). |
+| **Linux** | ✅ Tested in CI: PHP 8.2 and 8.4, Python 3.10 and 3.13, with pandas, NumPy, SymPy and spaCy. |
+| **Windows** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). It uses sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, and passes `SYSTEMROOT` through. |
+| **macOS** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). |
 | **32-bit PHP** | ❌ Not supported (PHP integers must be 64-bit). |
 | **Python < 3.10** | ❌ The worker fails at start-up with a clear `WorkerStartException`. |
 
@@ -896,7 +896,7 @@ Yes, by Python itself, and only within a session:
 
 **Environment**
 
-25. Windows and macOS not yet verified (see [Platform support](#platform-support)).
+25. SymPy and spaCy are tested in CI on Linux only; other libraries aren't tested by PyHP at all (see [Platform support](#platform-support)).
 26. 64-bit PHP 8.2+ and Python 3.10+ only.
 27. Not a sandbox. Trusted code only.
 28. `multiprocessing` from session code is untested. Functions defined inside the session (rather than in importable modules) can't be pickled into child processes on Windows/macOS (`spawn`).
@@ -1007,15 +1007,9 @@ Tests aren't run on commit (the PHP suite takes about 40 s); `composer check`, p
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs every check on GitHub Actions for each push and pull request: the Python worker on Python 3.10 and 3.13, and the PHP suite on PHP 8.2 and 8.4 with pandas installed, on Linux and Windows.
+`.github/workflows/ci.yml` runs every check on GitHub Actions for each push and pull request: the Python worker on Python 3.10 and 3.13, and the PHP suite on PHP 8.2 and 8.4 with pandas installed, on Linux, Windows and macOS. The Linux PHP jobs also install SymPy, spaCy and `en_core_web_sm`, so `SympyTest` and `SpacyTest` run there; elsewhere they skip.
 
-To test macOS too, add `macos-latest` to both `os:` lists:
-
-```yaml
-        os: [ubuntu-latest, windows-latest, macos-latest]
-```
-
-macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page), so you may prefer to run them only on pull requests.
+macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page).
 
 ### Rules the code follows
 
@@ -1025,14 +1019,11 @@ TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level m
 
 ## Roadmap
 
-See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Next up:
+See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Ideas after 0.1.0:
 
-1. **Verify on Windows**, then fix whatever it finds.
-2. ~~Imports, `modules` and `classes`~~ — done.
-3. ~~Faster bulk data~~ — done (`Py::rows()`, `Py::columns()`, faster conversion).
-4. ~~PHP callbacks~~ — done ([study](studies/php-callbacks.md)).
-5. **macOS CI** (one line in `ci.yml`, see [Continuous integration](#continuous-integration)).
-6. Packagist release, after a code review and choosing a license.
+1. `Py::ref($object, 'attribute')`: get an attribute as a proxy instead of a copy, so `Py::ref($doc, 'user_data')['k'] = 'v'` writes into Python.
+2. Convert integer-like numbers (such as SymPy's `Integer`) to PHP ints without losing precision.
+3. More examples and optional test suites for popular libraries.
 
 ## License
 
