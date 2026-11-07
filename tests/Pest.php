@@ -10,13 +10,14 @@ use PyHP\Setup\CommandRunner;
 /*
  * Every test talks to a real Python interpreter. Choose which one with the
  * PYHP_TEST_PYTHON environment variable (for example a venv's python.exe);
- * otherwise the platform default from Config is used.
+ * otherwise the one PyHP itself would pick (Config::detectPython()), which is
+ * this repository's .venv after `php bin/pyhp setup`.
  */
 function testPython(): string
 {
     $configured = getenv('PYHP_TEST_PYTHON');
 
-    return is_string($configured) && $configured !== '' ? $configured : Config::defaultPython();
+    return is_string($configured) && $configured !== '' ? $configured : Config::detectPython();
 }
 
 /**
