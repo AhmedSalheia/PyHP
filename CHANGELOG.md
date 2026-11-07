@@ -6,6 +6,8 @@ All notable changes to PyHP are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-07
+
 ### Changed
 - The Composer package is now `pyhp/pyhp` (was `ahmedsalheia/pyhp`) and the repository lives at https://github.com/pyhp-php/pyhp. The PHP namespace stays `PyHP\`, so only `composer.json` changes: `composer remove ahmedsalheia/pyhp && composer require pyhp/pyhp`.
 
@@ -31,5 +33,6 @@ First public release.
 - CI on Linux, Windows and macOS with PHP 8.2 / 8.4 and Python 3.10 / 3.13: Pest (80% coverage gate), PHPStan max, Pint, pytest, mypy --strict, ruff.
 - SymPy and spaCy suites on Linux; pandas and NumPy on all three systems.
 
-[Unreleased]: https://github.com/pyhp-php/pyhp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/pyhp-php/pyhp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pyhp-php/pyhp/releases/tag/v0.1.0
