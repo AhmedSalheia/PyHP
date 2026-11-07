@@ -25,6 +25,8 @@ All notable changes to PyHP are documented here. The format follows
 - PHP callbacks: PHP closures (including `strlen(...)`-style first-class callables) can be passed to Python and called from it, with keyword arguments as named arguments. Callbacks may call Python again (up to 32 levels). An uncaught exception from a callback is rethrown in PHP as the original object; Python can catch it as `pyhp.PhpError`. Time spent in PHP callbacks doesn't count against `timeout`. Callbacks only run on the thread serving PHP, while PHP waits. Protocol version 2.
 - `examples/05_callbacks.php`.
 
+- `examples/06_sympy.php` and `examples/07_spacy_nlp.php`, with optional Pest suites (`SympyTest`, `SpacyTest`) that skip when the library or spaCy model isn't installed; README section "SymPy and spaCy in practice".
+
 - `.githooks/pre-commit`: formats (Pint, ruff format), lints (ruff check) and type-checks (PHPStan, mypy) staged files before every commit.
 
 ### Changed
