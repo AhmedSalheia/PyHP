@@ -22,6 +22,9 @@ All notable changes to PyHP are documented here. The format follows
 
 - `studies/php-callbacks.md`: feasibility study and integration plan for calling PHP closures from Python.
 
+- PHP callbacks: PHP closures (including `strlen(...)`-style first-class callables) can be passed to Python and called from it, with keyword arguments as named arguments. Callbacks may call Python again (up to 32 levels). An uncaught exception from a callback is rethrown in PHP as the original object; Python can catch it as `pyhp.PhpError`. Time spent in PHP callbacks doesn't count against `timeout`. Callbacks only run on the thread serving PHP, while PHP waits. Protocol version 2.
+- `examples/05_callbacks.php`.
+
 ### Changed
 - Faster conversion of Python results: plain scalars skip per-value work and dict key sets are validated once per shape (records ~25% faster, flat lists ~4× faster), with identical output.
 - Python dicts now travel to PHP as plain JSON objects, and each response says whether it contains any tagged value. Plain results skip PHP's decode pass: copying 100k rows × 4 columns dropped from a 207 MB to a 60 MB memory peak, and from ~1.6 s to ~0.65 s (Linux).

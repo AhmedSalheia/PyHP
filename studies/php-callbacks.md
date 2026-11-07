@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Feasibility study, not implemented |
+| Status | **Implemented** on 2026-11-07 (`feature/php-callbacks`), with the decisions in section 10 answered: Closures only; deadline paused during callbacks; original exceptions rethrown; 32 levels; same thread during the call. One difference from section 6: the nesting limit is enforced in Python only (`RecursionError`), so there is no separate `CallbackDepthException` in PHP. |
 | Date | 2026-11-07 |
 | Applies to | PyHP after protocol 1 (imports, `modules`, `classes`, table export) |
 | Verdict | **Feasible.** Medium–high complexity, contained to the transport layer. Recommended, with clear limits (same call, same thread, no async). |
