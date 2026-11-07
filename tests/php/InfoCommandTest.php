@@ -1,0 +1,191 @@
+<?php
+
+declare(strict_types=1);
+
+use PyHP\Console\InfoCommand;
+use PyHP\Setup\VirtualEnv;
+
+beforeEach(function (): void {
+    $this->root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'pyhp-info-'.bin2hex(random_bytes(4));
+    mkdir($this->root);
+    $this->previousEnv = getenv('PYHP_PYTHON');
+    putenv('PYHP_PYTHON');
+    $lines = new ArrayObject;
+    $this->lines = $lines;
+    $this->out = function (string $text) use ($lines): void {
+        $lines->append($text);
+    };
+    $this->text = fn (): string => implode('', $lines->getArrayCopy());
+    $this->venvPython = function (): string {
+        $python = VirtualEnv::python($this->root.DIRECTORY_SEPARATOR.'.venv');
+        mkdir(dirname($python), 0777, true);
+        touch($python);
+
+        return $python;
+    };
+    $this->workerOk = fn (string $python): ?string => null;
+});
+
+afterEach(function (): void {
+    putenv($this->previousEnv === false ? 'PYHP_PYTHON' : 'PYHP_PYTHON='.$this->previousEnv);
+    removeDirectory($this->root);
+});
+
+/**
+ * The probe command InfoCommand runs, as FakeCommandRunner keys it.
+ *
+ * @param  list<string>  $packages
+ */
+function infoProbe(string $python, array $packages): string
+{
+    return implode(' ', [$python, '-c', InfoCommand::PYTHON_PROBE, json_encode($packages, JSON_THROW_ON_ERROR)]);
+}
+
+/** @param array<string, string|null> $packages */
+function probeAnswer(string $version = '3.12.7', array $packages = []): string
+{
+    return json_encode([
+        'version' => $version,
+        'implementation' => 'CPython',
+        'executable' => '/somewhere/python',
+        'prefix' => '/somewhere',
+        'packages' => (object) $packages,
+    ], JSON_THROW_ON_ERROR);
+}
+
+test('a healthy project reports PHP, Python, the venv, packages and uv, and exits 0', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['pandas>=2', 'numpy']]]]));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(
+        programs: ['uv' => '/bin/uv'],
+        captures: [
+            infoProbe($python, ['pandas', 'numpy']) => probeAnswer(packages: ['pandas' => '3.1.1', 'numpy' => '2.4.6']),
+            '/bin/uv --version' => 'uv 0.9.5',
+        ],
+    );
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    $text = ($this->text)();
+    expect($code)->toBe(0)
+        ->and($text)->toContain(PHP_VERSION)
+        ->and($text)->toContain(PHP_BINARY)
+        ->and($text)->toContain($python)
+        ->and($text)->toContain("the project's virtual environment")
+        ->and($text)->toContain('3.12.7 (CPython)')
+        ->and($text)->toContain('pandas 3.1.1')
+        ->and($text)->toContain('numpy 2.4.6')
+        ->and($text)->toContain('uv 0.9.5')
+        ->and($text)->toContain('Worker')
+        ->and($text)->toContain('Everything looks fine');
+});
+
+test('missing packages and a missing venv are reported as problems with the fix', function (): void {
+    file_put_contents($this->root.'/requirements.txt', "# comment\npandas>=2  # inline\n\n-r other.txt\nscikit-learn[alldeps]==1.9\nen_core_web_sm @ https://example.com/x.whl\n");
+    $python = PHP_OS_FAMILY === 'Windows' ? 'python' : 'python3';
+    $runner = new FakeCommandRunner(
+        programs: [],
+        captures: [
+            infoProbe($python, ['pandas', 'scikit-learn', 'en_core_web_sm']) => probeAnswer(packages: [
+                'pandas' => '3.1.1', 'scikit-learn' => null, 'en_core_web_sm' => null,
+            ]),
+        ],
+    );
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    $text = ($this->text)();
+    expect($code)->toBe(1)
+        ->and($text)->toContain('scikit-learn missing')
+        ->and($text)->toContain('Not installed: scikit-learn, en_core_web_sm')
+        ->and($text)->toContain('No virtual environment')
+        ->and($text)->toContain('pyhp setup')
+        ->and($text)->toContain('not installed (optional');
+});
+
+test('PYHP_PYTHON is reported as the reason', function (): void {
+    putenv('PYHP_PYTHON=/opt/python3.13');
+    $runner = new FakeCommandRunner(captures: [infoProbe('/opt/python3.13', []) => probeAnswer('3.13.1')]);
+
+    (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect(($this->text)())->toContain('PYHP_PYTHON')
+        ->and(($this->text)())->toContain('3.13.1');
+});
+
+test('a Python that cannot start is a problem, and the worker is not tried', function (): void {
+    $python = ($this->venvPython)();
+    $tried = new ArrayObject;
+    $worker = function (string $python) use ($tried): ?string {
+        $tried->append($python);
+
+        return null;
+    };
+
+    $code = (new InfoCommand(new FakeCommandRunner, $this->out, $worker))->run($this->root);
+
+    expect($code)->toBe(1)
+        ->and(($this->text)())->toContain("could not be started: {$python}")
+        ->and($tried->getArrayCopy())->toBe([]);
+});
+
+test('Python older than 3.10 is a problem', function (): void {
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => probeAnswer('3.9.18')]);
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect($code)->toBe(1)
+        ->and(($this->text)())->toContain('needs Python 3.10');
+});
+
+test('a worker that fails to start is a problem with its message', function (): void {
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => probeAnswer()]);
+    $broken = fn (string $python): ?string => 'the worker did not connect within 10 s';
+
+    $code = (new InfoCommand($runner, $this->out, $broken))->run($this->root);
+
+    expect($code)->toBe(1)
+        ->and(($this->text)())->toContain('the worker did not connect within 10 s');
+});
+
+test('a requirements file that does not exist is a problem', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => 'python/req.txt']]]));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => probeAnswer()]);
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect($code)->toBe(1)
+        ->and(($this->text)())->toContain('python/req.txt');
+});
+
+test('the real worker check starts a session with the interpreter', function (): void {
+    expect(InfoCommand::checkWorker(testPython()))->toBeNull()
+        ->and(InfoCommand::checkWorker($this->root.DIRECTORY_SEPARATOR.'no-python'))->toBeString();
+});
+
+test('pyhp info runs through the application and the bin script', function (): void {
+    $script = dirname(__DIR__, 2).DIRECTORY_SEPARATOR.'bin'.DIRECTORY_SEPARATOR.'pyhp';
+    putenv('PYHP_PYTHON='.testPython());
+    $output = [];
+    exec(escapeshellarg(PHP_BINARY).' '.escapeshellarg($script).' info', $output, $code);
+
+    expect(implode("\n", $output))->toContain('Python')
+        ->and(implode("\n", $output))->toContain('PYHP_PYTHON')
+        ->and($code)->toBeIn([0, 1]);
+});
+
+test('output from the interpreter that is not the expected JSON counts as not started', function (string $answer): void {
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => $answer]);
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect($code)->toBe(1)
+        ->and(($this->text)())->toContain('could not be started');
+})->with([
+    'not JSON' => ['Python 2.7.18'],
+    'wrong shape' => ['{"version": 3}'],
+]);
