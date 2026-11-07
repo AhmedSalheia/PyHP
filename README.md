@@ -685,7 +685,7 @@ The per-call figure is in line with other process-based bridges. In-process embe
 |---|---|
 | **Linux** | ✅ Tested: PHP 8.3, Python 3.13 (pandas 3.0, NumPy 2.5). |
 | **Windows** | 🎯 Primary target, **not yet run.** The design avoids the known Windows pitfalls: sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, `SYSTEMROOT` passed through. The included CI workflow runs the suite on Windows. Treat Windows as unverified until that passes. |
-| **macOS** | Expected to work like Linux; not tested. |
+| **macOS** | Expected to work like Linux; **not tested yet**. GitHub Actions has macOS runners, so CI can test it without a Mac (see [Continuous integration](#continuous-integration)). |
 | **32-bit PHP** | ❌ Not supported (PHP integers must be 64-bit). |
 | **Python < 3.10** | ❌ The worker fails at start-up with a clear `WorkerStartException`. |
 
@@ -831,6 +831,8 @@ PyHP/
 ├── tests/php/                 Pest tests (need a real interpreter)
 ├── tests/python/              pytest tests for the worker
 ├── examples/                  runnable examples + sample data
+├── benchmarks/                overhead.php, startup-trace.php
+├── studies/                   feasibility studies for possible features
 └── docs/PROJECT_CONTEXT.md    design decisions and roadmap
 ```
 
@@ -856,6 +858,18 @@ python -m mypy
 python -m pytest --cov
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs every check on GitHub Actions for each push and pull request: the Python worker on Python 3.10 and 3.13, and the PHP suite on PHP 8.2 and 8.4 with pandas installed, on Linux and Windows.
+
+To test macOS too, add `macos-latest` to both `os:` lists:
+
+```yaml
+        os: [ubuntu-latest, windows-latest, macos-latest]
+```
+
+macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page), so you may prefer to run them only on pull requests.
+
 ### Rules the code follows
 
 TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level max, `mypy --strict`, Ruff (`E,F,W,I,B,UP,N,S,ANN,SIM,RUF`), and fail-loudly exceptions. The worker stays standard-library-only.
@@ -870,7 +884,7 @@ See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Next
 2. ~~Imports, `modules` and `classes`~~ — done.
 3. ~~Faster bulk data~~ — done (`Py::rows()`, `Py::columns()`, faster conversion).
 4. **PHP callbacks** (`df.apply($phpClosure)`) — see the [feasibility study](studies/php-callbacks.md).
-5. **macOS CI.**
+5. **macOS CI** (one line in `ci.yml`, see [Continuous integration](#continuous-integration)).
 6. Packagist release, after a code review and choosing a license.
 
 ## License
