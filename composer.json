@@ -1,8 +1,13 @@
 {
-    "name": "ahmedsalheia/pyhp",
+    "name": "pyhp/pyhp",
     "description": "Use Python libraries (pandas, NumPy, ...) from PHP through a persistent Python worker and object proxies.",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/pyhp-php/pyhp",
+    "support": {
+        "issues": "https://github.com/pyhp-php/pyhp/issues",
+        "source": "https://github.com/pyhp-php/pyhp"
+    },
     "keywords": [
         "python",
         "pandas",
