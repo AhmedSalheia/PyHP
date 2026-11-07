@@ -15,6 +15,10 @@ All notable changes to PyHP are documented here. The format follows
 - Exception hierarchy, timeouts, crash detection, message size limits.
 - Examples for basics, vars/functions, pandas and NumPy; overhead benchmark.
 
+- `import()` follows Python's import statement: `from:` (`from datetime import time`), `as:`, star imports, and the imported name is always bound in the session.
+- `$py->modules`: every module bound in the session, with `names()` and `isset()`.
+- `$py->classes`: create instances of Python classes (`$py->classes->Invoice(...)`), get class proxies, `names()`; refuses non-classes.
+
 ### Changed
 - Python dicts now travel to PHP as plain JSON objects, and each response says whether it contains any tagged value. Plain results skip PHP's decode pass: copying 100k rows × 4 columns dropped from a 207 MB to a 60 MB memory peak, and from ~1.6 s to ~0.65 s (Linux).
 

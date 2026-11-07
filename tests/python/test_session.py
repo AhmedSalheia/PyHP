@@ -310,3 +310,93 @@ def test_responses_say_whether_php_must_look_for_tags(session: Session) -> None:
     assert tagged["tagged"] is True
     module = session.handle({"op": "import", "module": "math"})
     assert module["tagged"] is True
+
+
+def test_plain_import_binds_the_top_level_name_like_python(session: Session) -> None:
+    module = ok_value(session.handle({"op": "import", "module": "os.path"}))
+    assert isinstance(module, dict)
+    assert module["type"] == "module"
+    assert ok_value(session.handle({"op": "eval", "expr": "os.path.sep in '/\\\\'"})) is True
+
+
+def test_from_import_binds_the_imported_name(session: Session) -> None:
+    cls = ok_value(session.handle({"op": "import", "module": "time", "from": "datetime"}))
+    assert isinstance(cls, dict)
+    assert cls["type"] == "type"
+    assert ok_value(session.handle({"op": "eval", "expr": "time(3).hour"})) == 3
+
+
+def test_from_import_with_alias(session: Session) -> None:
+    ok_value(session.handle({"op": "import", "module": "date", "from": "datetime", "as": "d"}))
+    assert ok_value(session.handle({"op": "eval", "expr": "d(2024, 1, 2).year"})) == 2024
+    assert ok_value(session.handle({"op": "has_var", "name": "date"})) is False
+
+
+def test_from_import_of_a_plain_value_returns_the_value(session: Session) -> None:
+    pi = ok_value(session.handle({"op": "import", "module": "pi", "from": "math"}))
+    assert isinstance(pi, float)
+    assert 3.14 < pi < 3.15
+
+
+def test_from_import_of_a_submodule(session: Session) -> None:
+    module = ok_value(session.handle({"op": "import", "module": "util", "from": "importlib"}))
+    assert isinstance(module, dict)
+    assert module["type"] == "module"
+    assert ok_value(session.handle({"op": "eval", "expr": "util.__name__"})) == "importlib.util"
+
+
+def test_from_import_of_a_missing_name_is_an_import_error(session: Session) -> None:
+    error = error_of(session.handle({"op": "import", "module": "nope", "from": "math"}))
+    assert error["type"] == "ImportError"
+    assert "cannot import name 'nope' from 'math'" in str(error["message"])
+
+
+def test_star_import_binds_public_names(session: Session) -> None:
+    assert ok_value(session.handle({"op": "import", "module": "*", "from": "math"})) is None
+    assert ok_value(session.handle({"op": "eval", "expr": "floor(2.5)"})) == 2
+    names = ok_value(session.handle({"op": "global_names", "kind": "any"}))
+    assert isinstance(names, list)
+    assert "sqrt" in names
+
+
+def test_import_rejects_invalid_names(session: Session) -> None:
+    star_as: dict[str, object] = {"op": "import", "module": "*", "from": "math", "as": "m"}
+    assert error_of(session.handle(star_as))["kind"] == "protocol"
+    plain_star: dict[str, object] = {"op": "import", "module": "*"}
+    assert error_of(session.handle(plain_star))["kind"] == "protocol"
+
+
+def test_globals_can_be_listed_fetched_and_checked_by_kind(session: Session) -> None:
+    ok_value(session.handle({"op": "import", "module": "math"}))
+    ok_value(session.handle({"op": "exec", "code": "import json\nclass Invoice:\n    pass\nn = 1"}))
+    assert ok_value(session.handle({"op": "global_names", "kind": "module"})) == ["math", "json"]
+    assert ok_value(session.handle({"op": "global_names", "kind": "class"})) == ["Invoice"]
+    module = ok_value(session.handle({"op": "get_global", "name": "json", "kind": "module"}))
+    assert isinstance(module, dict)
+    assert module["$t"] == "ref"
+    wrong = session.handle({"op": "get_global", "name": "n", "kind": "module"})
+    assert error_of(wrong)["type"] == "TypeError"
+    missing = session.handle({"op": "get_global", "name": "zzz", "kind": "class"})
+    assert error_of(missing)["type"] == "NameError"
+    assert (
+        ok_value(session.handle({"op": "has_global", "name": "Invoice", "kind": "class"})) is True
+    )
+    assert ok_value(session.handle({"op": "has_global", "name": "dict", "kind": "class"})) is True
+    assert ok_value(session.handle({"op": "has_global", "name": "n", "kind": "class"})) is False
+    assert ok_value(session.handle({"op": "has_global", "name": "zzz", "kind": "module"})) is False
+    bad_kind = session.handle({"op": "has_global", "name": "n", "kind": "nope"})
+    assert error_of(bad_kind)["kind"] == "protocol"
+
+
+def test_calling_a_global_can_require_a_class(session: Session) -> None:
+    ok_value(
+        session.handle({"op": "exec", "code": "class Box:\n    pass\ndef make():\n    return 1"})
+    )
+    box = session.handle(
+        {"op": "call_global", "name": "Box", "kind": "class", "args": [], "kwargs": {}}
+    )
+    assert isinstance(ok_value(box), dict)
+    func = session.handle(
+        {"op": "call_global", "name": "make", "kind": "class", "args": [], "kwargs": {}}
+    )
+    assert error_of(func)["type"] == "TypeError"

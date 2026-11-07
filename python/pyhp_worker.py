@@ -383,6 +383,9 @@ class Session:
             "has_var": lambda r: _name(r, "name") in self.globals,
             "var_names": lambda _: [n for n in self.globals if not n.startswith("__")],
             "is_callable_global": self._is_callable_global,
+            "global_names": self._global_names,
+            "get_global": lambda r: self._as_ref(self._global_of_kind(r)),
+            "has_global": self._has_global,
             "call_global": self._call_global,
             "import": self._import,
             "getattr": lambda r: getattr(self._target(r), _name(r, "name")),
@@ -544,22 +547,90 @@ class Session:
 
     def _call_global(self, request: Request) -> object:
         name = _name(request, "name")
-        function = self.globals_get(name)
+        function = self._global_of_kind(request) if "kind" in request else self.globals_get(name)
         if not callable(function):
             msg = f"'{name}' is a {type_name(function)}, not a function"
             raise TypeError(msg)
         args, kwargs = self._call_args(request)
         return function(*args, **kwargs)
 
+    def _global_of_kind(self, request: Request) -> object:
+        """The global `name`, which must be of `kind`; builtins count, as in Python."""
+        name = _name(request, "name")
+        kind = _kind(request)
+        value = self.globals_get(name)
+        if not _is_kind(value, kind):
+            msg = f"'{name}' is a {type_name(value)}, not a {kind}"
+            raise TypeError(msg)
+        return value
+
+    def _has_global(self, request: Request) -> object:
+        kind = _kind(request)
+        try:
+            value = self.globals_get(_name(request, "name"))
+        except NameError:
+            return False
+        return _is_kind(value, kind)
+
+    def _global_names(self, request: Request) -> object:
+        kind = _kind(request)
+        return [
+            name
+            for name, value in self.globals.items()
+            if not name.startswith("__") and _is_kind(value, kind)
+        ]
+
     def _import(self, request: Request) -> object:
-        module = importlib.import_module(_text(request, "module"))
+        """`import m`, `import m as a`, `from p import n [as a]`, `from p import *`."""
+        name = _text(request, "module")
+        package = request.get("from")
         alias = request.get("as")
-        if alias is not None:
-            if not isinstance(alias, str) or not alias.isidentifier():
-                msg = "import alias must be a Python identifier"
+        if alias is not None and (not isinstance(alias, str) or not alias.isidentifier()):
+            msg = "import alias must be a Python identifier"
+            raise ProtocolError(msg)
+        if package is None:
+            if name == "*":
+                msg = "'*' can only be imported from a module (use from=...)"
                 raise ProtocolError(msg)
-            self.globals[alias] = module
-        return self._as_ref(module)
+            module = importlib.import_module(name)
+            if alias is not None:
+                self.globals[alias] = module
+            else:
+                # Like Python: `import os.path` binds `os`.
+                top = name.partition(".")[0]
+                self.globals[top] = sys.modules[top]
+            return self._as_ref(module)
+        if not isinstance(package, str) or package == "":
+            msg = "field 'from' must be a module name"
+            raise ProtocolError(msg)
+        source = importlib.import_module(package)
+        if name == "*":
+            if alias is not None:
+                msg = "'from ... import *' cannot have an alias"
+                raise ProtocolError(msg)
+            self._import_star(source)
+            return None
+        value = self._from_import(source, package, name)
+        self.globals[alias if alias is not None else name] = value
+        return value
+
+    def _from_import(self, source: types.ModuleType, package: str, name: str) -> object:
+        try:
+            return getattr(source, name)
+        except AttributeError:
+            pass
+        try:  # a submodule that hasn't been imported yet
+            return importlib.import_module(f"{package}.{name}")
+        except ModuleNotFoundError:
+            msg = f"cannot import name '{name}' from '{package}'"
+            raise ImportError(msg, name=package) from None
+
+    def _import_star(self, source: types.ModuleType) -> None:
+        public = getattr(source, "__all__", None)
+        if public is None:
+            public = [n for n in vars(source) if not n.startswith("_")]
+        for name in public:
+            self.globals[name] = getattr(source, name)
 
     def _setattr(self, request: Request) -> object:
         setattr(self._target(request), _name(request, "name"), self._arg(request, "value"))
@@ -611,6 +682,27 @@ class Session:
             if len(items) >= size:
                 return {"items": items, "done": False}
         return {"items": items, "done": True}
+
+
+_KINDS: Final = ("any", "module", "class", "callable")
+
+
+def _kind(request: Request) -> str:
+    kind = request.get("kind")
+    if not isinstance(kind, str) or kind not in _KINDS:
+        msg = f"field 'kind' must be one of {', '.join(_KINDS)}"
+        raise ProtocolError(msg)
+    return kind
+
+
+def _is_kind(value: object, kind: str) -> bool:
+    if kind == "module":
+        return isinstance(value, types.ModuleType)
+    if kind == "class":
+        return isinstance(value, type)
+    if kind == "callable":
+        return callable(value)
+    return True
 
 
 def _text(request: Request, key: str) -> str:

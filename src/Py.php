@@ -94,9 +94,19 @@ final class Py
         return self::default()->eval($expression);
     }
 
-    public static function import(string $module, ?string $as = null): PyObject
+    public static function import(string $module, ?string $as = null, ?string $from = null): mixed
     {
-        return self::default()->import($module, $as);
+        return self::default()->import($module, $as, $from);
+    }
+
+    public static function modules(): Modules
+    {
+        return self::default()->modules;
+    }
+
+    public static function classes(): Classes
+    {
+        return self::default()->classes;
     }
 
     public static function vars(): Vars

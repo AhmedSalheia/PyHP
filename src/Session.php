@@ -27,6 +27,12 @@ final class Session
     /** Call Python global functions (and classes, and builtins): $py->functions->name(...). */
     public readonly Functions $functions;
 
+    /** Modules bound in the session namespace: $py->modules->pd. */
+    public readonly Modules $modules;
+
+    /** Python classes (yours, imported ones and builtins): $py->classes->Invoice(...). */
+    public readonly Classes $classes;
+
     private ?Worker $worker;
 
     private readonly Codec $codec;
@@ -41,6 +47,8 @@ final class Session
         $this->codec = new Codec($this);
         $this->vars = new Vars($this);
         $this->functions = new Functions($this);
+        $this->modules = new Modules($this);
+        $this->classes = new Classes($this);
         $this->worker = Worker::start($config);
     }
 
@@ -82,19 +90,20 @@ final class Session
     }
 
     /**
-     * Import a module and return a proxy to it.
+     * Import like Python does, binding the name in the session namespace:
      *
-     * With $as, the module is also bound to that name in the session namespace,
-     * like "import pandas as pd", so later exec() code can use it.
+     *     import('pandas')                    import pandas           (binds pandas)
+     *     import('pandas', as: 'pd')          import pandas as pd     (binds pd)
+     *     import('os.path')                   import os.path          (binds os, returns os.path)
+     *     import('time', from: 'datetime')    from datetime import time
+     *     import('*', from: 'math')           from math import *      (returns null)
+     *
+     * Returns what was imported: a module or class proxy, or a plain PHP value
+     * when the imported name is plain data (e.g. import('pi', from: 'math')).
      */
-    public function import(string $module, ?string $as = null): PyObject
+    public function import(string $module, ?string $as = null, ?string $from = null): mixed
     {
-        $result = $this->request('import', ['module' => $module, 'as' => $as]);
-        if (! $result instanceof PyObject) {
-            throw new ProtocolException('import did not return a module reference.');
-        }
-
-        return $result;
+        return $this->request('import', ['module' => $module, 'as' => $as, 'from' => $from]);
     }
 
     /** Text printed by Python since the last call, in OutputMode::Capture. Clears the buffer. */
