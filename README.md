@@ -29,19 +29,20 @@ print_r($totals->to_dict());                                // ['west' => 306861
 6. [API reference](#api-reference)
 7. [How values are converted](#how-values-are-converted)
 8. [pandas and NumPy in practice](#pandas-and-numpy-in-practice)
-9. [Printed output and the log](#printed-output-and-the-log)
-10. [Errors](#errors)
-11. [Object lifetime and memory](#object-lifetime-and-memory)
-12. [Performance](#performance)
-13. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
-14. [Security](#security)
-15. [Platform support](#platform-support)
-16. [Imports](#imports)
-17. [Every limitation in one list](#every-limitation-in-one-list)
-18. [How it works inside](#how-it-works-inside)
-19. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
-20. [Development](#development)
-21. [Roadmap](#roadmap)
+9. [PHP callbacks](#php-callbacks)
+10. [Printed output and the log](#printed-output-and-the-log)
+11. [Errors](#errors)
+12. [Object lifetime and memory](#object-lifetime-and-memory)
+13. [Performance](#performance)
+14. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
+15. [Security](#security)
+16. [Platform support](#platform-support)
+17. [Imports](#imports)
+18. [Every limitation in one list](#every-limitation-in-one-list)
+19. [How it works inside](#how-it-works-inside)
+20. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
+21. [Development](#development)
+22. [Roadmap](#roadmap)
 
 ---
 
@@ -272,7 +273,7 @@ You can also build a `Config` directly with named arguments: `new Session(new Co
 | `$functions` | Global callables (see below). |
 | `takeOutput(): string` | In capture mode, the text printed since the last call to `takeOutput()`; then clears it. |
 | `log(): string` | Everything the worker wrote to stderr so far (warnings, crash output). |
-| `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `pid`. |
+| `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `callbacks` (PHP closures Python holds), `pid`. |
 | `isOpen(): bool` | Whether the worker is running. |
 | `close(): void` | Stop the worker. Safe to call twice. Also happens automatically when the session object is destroyed. |
 | `config(): Config` | The session's configuration. |
@@ -410,7 +411,8 @@ Things that look like they should work but behave differently:
 | `Py::tuple(...)` | `tuple` | |
 | `Py::slice(...)` | `slice` | |
 | `Py::dict([...])` | `dict` | Even when list-shaped. |
-| `Closure` / callable | ✗ `ConversionException` | Callbacks from Python into PHP aren't supported yet. |
+| `Closure` (also `strlen(...)` first-class callables) | a callable `pyhp.PhpCallable` | See [PHP callbacks](#php-callbacks). It comes back to PHP as the same `Closure`. |
+| callable strings and arrays (`'strlen'`, `[$obj, 'method']`) | `str` / `list` | **Never** treated as callables: data stays data. Wrap them: `strlen(...)`, `$obj->method(...)`. |
 | any other object (`DateTime`, enums, your classes) | ✗ `ConversionException` | Convert first: `$date->format('c')`, `$enum->value`, `(array) $dto`. |
 | resource | ✗ `ConversionException` | |
 | arrays nested deeper than 256 levels | ✗ `ConversionException` | |
@@ -496,7 +498,7 @@ $rows = $summary->reset_index()->to_dict('records');               // small → 
 | `np.linalg.det(m)` | `$np->linalg->det($m)` |
 | `len(df)` | `Py::len($df)` |
 | `print(df)` | `echo $df;` |
-| `lambda x: x * 2` | not possible from PHP. Define it in Python: `$py->exec('double = lambda x: x * 2')`, then pass `$py->functions->double` |
+| `lambda x: x * 2` | a PHP closure: `fn ($x) => $x * 2` (see [PHP callbacks](#php-callbacks)), or a Python lambda via `exec()` when speed matters |
 
 When a chain gets long or needs lambdas, write that part in Python. Both styles share the same objects:
 
@@ -539,6 +541,86 @@ They differ from `to_dict()` on purpose, to give you data PHP can use directly:
 
 ---
 
+## PHP callbacks
+
+PHP closures can be passed to Python wherever Python expects a function. Python calls them, PHP runs them, and Python carries on with the result:
+
+```php
+$sorted = $py->functions->sorted($people, key: fn (array $p) => $p['age']);
+
+$names = $pd->Series(['ahmed', 'sam']);
+$names->apply(ucfirst(...))->tolist();                 // ['Ahmed', 'Sam']
+
+$py->vars->scale = fn (float $x, float $by = 1.0) => $x * $by;
+$py->eval('scale(2.0, by=1.5)');                       // 3.0: keyword arguments become named arguments
+
+$py->modules->scipy->optimize->minimize(fn ($x) => cost($x), x0: [1, 2]);   // any library that takes a function
+```
+
+### What gets passed
+
+* **Only `Closure` objects** become Python callables: `fn () => ...`, `function () {...}`, and first-class callables like `strlen(...)` or `$obj->method(...)`. Strings and arrays are never treated as callables, even if PHP's `is_callable()` would accept them, so a string like `"system"` in your data can never become something Python can call.
+* **Arguments** follow the usual [conversion rules](#how-values-are-converted): plain data is copied, everything else arrives as a `PyObject` proxy. Python keyword arguments arrive as PHP named arguments.
+* **The return value** is converted back the same way (arrays, scalars, proxies, `Py::tuple()`, ...).
+* **The same closure** passed twice is the same Python object, and a closure Python hands back arrives in PHP as the original `Closure`.
+
+### Callbacks that call Python
+
+A callback can use the session freely: read `vars`, call `functions`, create proxies. Python serves those calls while it waits for the callback, so these nest:
+
+```php
+$py->exec('def through(f, n): return f(n) + 1');
+$inner = fn (int $n) => $py->vars->base + $n;                    // PHP → Python, inside a callback
+$outer = fn (int $n) => $py->functions->through($inner, $n * 2); // and another level
+$py->functions->through($outer, 1);
+```
+
+Nesting is limited to **32 levels** (PHP → Python → PHP → ...); deeper raises `RecursionError` in Python, which reaches PHP as `PythonException`.
+
+### Exceptions
+
+* If a callback throws and Python **doesn't** catch it, PHP rethrows **the original exception object**, so `catch (YourDomainException $e)` keeps working through Python:
+
+  ```php
+  try {
+      $py->functions->process($rows, fn ($row) => throw new InvalidRow($row));
+  } catch (InvalidRow $e) {        // the exact object the callback threw
+  }
+  ```
+
+* Python code can catch it as `PhpError` (with `php_class` and `php_message`):
+
+  ```python
+  from pyhp import PhpError
+
+  try:
+      callback(row)
+  except PhpError as e:
+      print(e.php_class, e.php_message)
+  ```
+
+* A return value PHP can't send (e.g. a `DateTime`) fails like an exception thrown inside the callback.
+
+### Timeouts, threads and lifetime
+
+* **Time spent running PHP callbacks doesn't count against `timeout`.** The timeout exists to stop Python that hangs; a slow PHP closure isn't that. (Python's own time still counts, and nested calls have their own timeout.)
+* **Callbacks must be called from the thread that serves PHP's requests, while PHP is waiting on a call.** A callback called from another Python thread (`threading`, `ThreadPoolExecutor`, some ML libraries' background threads) raises `RuntimeError` in that thread. A callback stored in Python and called during a *later* call works fine.
+* PHP keeps a closure alive while Python holds it, and lets it go when Python drops it. `$py->info()['callbacks']` shows how many Python holds.
+* Closing the session inside a callback ends the outer call with `SessionClosedException` (or with the exception the callback threw).
+
+### Speed: prefer one callback per column, not per row
+
+Each callback is one round trip (~65 µs on Linux), the same as any other call. Fine for an optimizer objective called 200 times; slow for a million rows:
+
+| | 10,000 values |
+|---|---|
+| `$series->apply(fn ($x) => $x * 2)`: one callback per value | ~665 ms |
+| `$series->pipe(fn (PyObject $s) => $s->mul(2))`: one callback, pandas does the loop | ~0.7 ms |
+
+`pipe()` passes the whole Series (as a proxy) to your closure once, and you use pandas methods on it. When you need per-value logic on big data, write that function in Python instead.
+
+---
+
 ## Printed output and the log
 
 Python has two kinds of output, and PyHP treats them differently.
@@ -567,7 +649,8 @@ Everything PyHP throws extends `PyHP\Exception\PyHPException`.
 | Exception | When | Session afterwards |
 |---|---|---|
 | `PythonException` | Your Python code raised. Has `pythonType` (`"ValueError"`), `pythonMessage`, and `pythonTraceback` (the full Python traceback, starting at your code). `getMessage()` is `"ValueError: message"`. | ✅ still usable |
-| `ConversionException` | A value can't cross the boundary (PHP closure, `DateTime`, proxy from another session, strict `toPhp()` failure). | ✅ still usable |
+| `ConversionException` | A value can't cross the boundary (`DateTime`, other objects, proxy from another session, strict `toPhp()` failure). | ✅ still usable |
+| *your own exception* | A [PHP callback](#php-callbacks) threw and Python didn't catch it: the original object is rethrown. | ✅ still usable |
 | `MessageTooLargeException` | A request or result is bigger than `max_message_bytes`. | ✅ still usable |
 | `ConfigException` | Invalid option (unknown key, wrong type, bad value). | n/a: thrown before starting |
 | `WorkerStartException` | Python couldn't be started: interpreter not found, crashed during start-up (e.g. Python < 3.10), didn't connect within `startup_timeout`. The message includes the exit code and the worker log. | n/a: never started |
@@ -738,7 +821,7 @@ Yes, by Python itself, and only within a session:
 **Syntax gaps**
 
 8. No Python operators on proxies (`+`, `>`, `&`, `~`, `@`, …). Use method forms or `eval()`.
-9. No PHP closures as Python callbacks (`df.apply(fn)` with a PHP function). Define callables in Python.
+9. PHP callbacks: one round trip each (~65 µs), only from the thread serving PHP and while PHP waits, at most 32 levels of nesting. Strings/arrays are never callables. See [PHP callbacks](#php-callbacks).
 10. `count($proxy)` doesn't work; use `Py::len()`. `if ($proxy)` is always true.
 11. Proxy `==`/`===` compares proxies, not Python objects.
 12. Python methods named `offsetGet`, `offsetSet`, `offsetExists`, `offsetUnset`, `getIterator`, or like PHP magic methods need `$o->__call('name', [...])`.
@@ -792,8 +875,9 @@ Yes, by Python itself, and only within a session:
 4. **Values:** JSON natives travel as-is, and Python dicts travel as plain JSON objects, so PHP's `json_decode()` produces the final array directly. Every response carries a `tagged` flag; when it's `false` (no references, bytes or NaN/Inf anywhere in the value), PHP uses that array as-is, without a second pass or a second copy. Other values are tagged objects: `{"$t": "ref", "id": 7, "type": "pandas.DataFrame"}`, `{"$t": "bytes", "v": "<base64>"}`, `{"$t": "float", "v": "nan"}`, and `{"$t": "dict", "o": {…}}` for the rare Python dict that itself has a `"$t"` key. From PHP to Python, dicts travel as `{"$t": "dict", "v": [[key, value], …]}` so integer keys stay integers, plus `{"$t": "tuple", …}` and `{"$t": "slice", …}`.
 5. **Releases:** IDs of freed proxies ride along on the next request (`"release": [7, 9]`).
 6. **Timeouts:** PHP waits with `stream_select()` against one deadline per call. On expiry the worker is killed.
+7. **Callbacks:** while Python handles a request it may send `{"op": "php_call", "seq": 1, "cb": 3, "args": [...], "kwargs": {...}}` instead of a response. PHP runs closure #3 (closures travel as `{"$t": "callback", "id": 3}`), pauses the deadline meanwhile, and answers `{"op": "php_return", "seq": 1, "ok": true, "value": ...}`. While Python waits for that answer, PHP may send ordinary requests (the closure calling Python), which Python serves first. Closures Python drops are reported in `"release_callbacks"`.
 
-The protocol is versioned (`protocol: 1`). A mismatch between PHP and Python halves fails at the handshake.
+The protocol is versioned (`protocol: 2` since callbacks). A mismatch between PHP and Python halves fails at the handshake.
 
 ---
 
@@ -883,7 +967,7 @@ See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Next
 1. **Verify on Windows**, then fix whatever it finds.
 2. ~~Imports, `modules` and `classes`~~ — done.
 3. ~~Faster bulk data~~ — done (`Py::rows()`, `Py::columns()`, faster conversion).
-4. **PHP callbacks** (`df.apply($phpClosure)`) — see the [feasibility study](studies/php-callbacks.md).
+4. ~~PHP callbacks~~ — done ([study](studies/php-callbacks.md)).
 5. **macOS CI** (one line in `ci.yml`, see [Continuous integration](#continuous-integration)).
 6. Packagist release, after a code review and choosing a license.
 

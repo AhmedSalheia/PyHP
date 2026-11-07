@@ -29,14 +29,20 @@ import re
 import socket
 import struct
 import sys
+import threading
 import time
 import tokenize
 import traceback
 import types
+import weakref
 from collections.abc import Callable, Iterable, Iterator
 from typing import Final, Protocol, TypeAlias, cast
 
-PROTOCOL_VERSION: Final = 1
+PROTOCOL_VERSION: Final = 2
+# How deep PHP -> Python -> PHP -> ... callbacks may nest.
+MAX_CALLBACK_DEPTH: Final = 32
+# Module that Python code imports PyHP's own types from: `from pyhp import PhpError`.
+PUBLIC_MODULE: Final = "pyhp"
 INT64_MIN: Final = -(2**63)
 INT64_MAX: Final = 2**63 - 1
 MAX_DEPTH: Final = 256
@@ -66,6 +72,35 @@ class StaleReferenceError(Exception):
 
 class ProtocolError(Exception):
     """A request is malformed. This is a bug in the PHP side, not in user code."""
+
+
+class WorkerExit(BaseException):  # a control-flow signal, not an error
+    """PHP closed the connection or asked the worker to stop.
+
+    A BaseException so that it unwinds through user code and every pending
+    request (including nested callbacks) instead of being reported to PHP.
+    """
+
+
+class FatalFrameError(BaseException):
+    """A frame from PHP can't be read; the conversation can't continue."""
+
+
+class PhpError(Exception):
+    """A PHP callback threw an exception.
+
+    Python code can catch it: `from pyhp import PhpError`. If it isn't caught,
+    PHP rethrows the original PHP exception object.
+    """
+
+    def __init__(self, php_class: str, php_message: str, error_id: int) -> None:
+        super().__init__(f"{php_class}: {php_message}" if php_message else php_class)
+        self.php_class = php_class
+        self.php_message = php_message
+        self.error_id = error_id
+
+
+PhpError.__module__ = PUBLIC_MODULE
 
 
 class Registry:
@@ -239,6 +274,9 @@ def _encode(value: object, state: _EncodeState, depth: int) -> Json:  # fast pat
             state.tagged = True
         return scalar
 
+    if isinstance(value, PhpCallable):
+        return state.tag({"$t": "callback", "id": value.callback_id})
+
     if _is_container(value, state.strict):
         if id(value) in state.path or depth >= MAX_DEPTH:
             if state.strict:
@@ -369,11 +407,16 @@ def _php_key(key: object, strict: bool) -> int | str | None:
 # --------------------------------------------------------------------------- #
 
 
-def decode(data: object, registry: Registry) -> object:  # one flat tag switch
+CallbackFactory: TypeAlias = Callable[[int], object]
+
+
+def decode(  # one flat tag switch
+    data: object, registry: Registry, callbacks: CallbackFactory | None = None
+) -> object:
     if data is None or isinstance(data, (bool, int, float, str)):
         return data
     if isinstance(data, list):
-        return [decode(item, registry) for item in data]
+        return [decode(item, registry, callbacks) for item in data]
     if not isinstance(data, dict):
         msg = f"unexpected wire value of type {type_name(data)}"
         raise ConversionError(msg)
@@ -381,16 +424,23 @@ def decode(data: object, registry: Registry) -> object:  # one flat tag switch
     raw = data.get("v")
     if tag == "ref":
         return registry.get(_require_int(data.get("id"), "ref id"))
+    if tag == "callback":
+        if callbacks is None:
+            msg = "PHP callbacks can only be used inside a session"
+            raise ConversionError(msg)
+        return callbacks(_require_int(data.get("id"), "callback id"))
     if tag == "dict":
         result: dict[object, object] = {}
         for pair in _require_list(raw, "dict pairs"):
             key, item = _require_list(pair, "dict pair")
-            result[decode(key, registry)] = decode(item, registry)
+            result[decode(key, registry, callbacks)] = decode(item, registry, callbacks)
         return result
     if tag == "tuple":
-        return tuple(decode(item, registry) for item in _require_list(raw, "tuple"))
+        return tuple(decode(item, registry, callbacks) for item in _require_list(raw, "tuple"))
     if tag == "slice":
-        start, stop, step = (decode(item, registry) for item in _require_list(raw, "slice"))
+        start, stop, step = (
+            decode(item, registry, callbacks) for item in _require_list(raw, "slice")
+        )
         return slice(start, stop, step)
     if tag == "bytes":
         if not isinstance(raw, str):
@@ -447,15 +497,58 @@ class _Iterable(Protocol):
     def __iter__(self) -> Iterator[object]: ...
 
 
+class Bridge(Protocol):
+    """The connection to PHP, as the session sees it."""
+
+    def send(self, message: Response) -> None: ...
+
+    def send_call(self, message: dict[str, object]) -> None: ...
+
+    def receive(self) -> Request | None: ...
+
+
+class PhpCallable:
+    """A PHP closure that Python code can call like a function."""
+
+    __slots__ = ("__weakref__", "_session", "callback_id")
+
+    def __init__(self, session: Session, callback_id: int) -> None:
+        self._session = session
+        self.callback_id = callback_id
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._session.call_php(self.callback_id, args, kwargs)
+
+    def __repr__(self) -> str:
+        return f"<PHP callback #{self.callback_id}>"
+
+
+PhpCallable.__module__ = PUBLIC_MODULE
+
+
 class Session:
-    def __init__(self) -> None:
+    def __init__(self, bridge: Bridge | None = None) -> None:
         self.module = types.ModuleType(NAMESPACE_MODULE)
         # Registering the module lets pickle find functions/classes defined in the session.
         sys.modules[NAMESPACE_MODULE] = self.module
+        public = types.ModuleType(PUBLIC_MODULE)
+        public.PhpError = PhpError  # type: ignore[attr-defined]  # building a module
+        public.PhpCallable = PhpCallable  # type: ignore[attr-defined]  # building a module
+        sys.modules[PUBLIC_MODULE] = public
         self.globals: dict[str, object] = self.module.__dict__
         self.globals["__builtins__"] = builtins
         self.registry = Registry()
         self._snippets = 0
+        # PHP callbacks
+        self.bridge = bridge
+        self.callback_depth = 0
+        self._callables: weakref.WeakValueDictionary[int, PhpCallable] = (
+            weakref.WeakValueDictionary()
+        )
+        self._released_callbacks: list[int] = []
+        self._call_seq = 0
+        self._active_requests = 0
+        self._thread = threading.get_ident()
         self._handlers: dict[str, Handler] = {
             "ping": self._ping,
             "shutdown": lambda _: None,
@@ -498,6 +591,9 @@ class Session:
     # -- request dispatch ---------------------------------------------------- #
 
     def handle(self, request: Request) -> Response:
+        return self._with_releases(self._handle(request))
+
+    def _handle(self, request: Request) -> Response:
         output = io.StringIO()
         try:
             release = request.get("release", [])
@@ -509,12 +605,18 @@ class Session:
             if handler is None:
                 msg = f"unknown operation {op!r}"
                 raise ProtocolError(msg)
-            with contextlib.redirect_stdout(output):
-                result = handler(request)
+            self._active_requests += 1
+            try:
+                with contextlib.redirect_stdout(output):
+                    result = handler(request)
+            finally:
+                self._active_requests -= 1
             if isinstance(result, _Raw):
                 value, tagged = result.value, result.tagged
             else:
                 value, tagged = encode_value(result, self.registry)
+        except (WorkerExit, FatalFrameError):
+            raise
         except ProtocolError as error:
             return _error_response("protocol", error, output)
         except StaleReferenceError as error:
@@ -524,6 +626,110 @@ class Session:
         except BaseException as error:  # forwarded to PHP as PythonException
             return _error_response("python", error, output, with_traceback=True)
         return {"ok": True, "value": value, "tagged": tagged, "out": output.getvalue()}
+
+    # -- PHP callbacks ------------------------------------------------------- #
+
+    def call_php(
+        self, callback_id: int, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> object:
+        """Call PHP closure `callback_id` and wait for its result.
+
+        While waiting, PHP may send nested requests (the closure calling Python
+        again); they are served here, on the same thread, until PHP answers.
+        """
+        if threading.get_ident() != self._thread:
+            msg = (
+                "PHP callbacks can only be called from the thread that serves PHP's "
+                "requests, not from other threads"
+            )
+            raise RuntimeError(msg)
+        if self._active_requests == 0:
+            msg = "PHP callbacks can only be called while PHP is waiting on a call into Python"
+            raise RuntimeError(msg)
+        bridge = self.bridge
+        if bridge is None:
+            msg = "this session has no PHP connection to call back into"
+            raise RuntimeError(msg)
+        if self.callback_depth >= MAX_CALLBACK_DEPTH:
+            msg = f"PHP callbacks are nested more than {MAX_CALLBACK_DEPTH} levels deep"
+            raise RecursionError(msg)
+
+        self._call_seq += 1
+        seq = self._call_seq
+        encoded_args, args_tagged = encode_value(list(args), self.registry)
+        encoded_kwargs, kwargs_tagged = encode_value(kwargs, self.registry)
+        message: dict[str, object] = {
+            "op": "php_call",
+            "seq": seq,
+            "cb": callback_id,
+            "args": encoded_args,
+            "kwargs": encoded_kwargs,
+            "tagged": args_tagged or kwargs_tagged,
+        }
+        bridge.send_call(self._with_releases(message))
+        self.callback_depth += 1
+        try:
+            while True:
+                frame = bridge.receive()
+                if frame is None:
+                    raise WorkerExit
+                if frame.get("op") == "php_return":
+                    return self._php_result(frame, seq)
+                bridge.send(self.handle(frame))  # a nested request
+                if frame.get("op") == "shutdown":
+                    raise WorkerExit
+        finally:
+            self.callback_depth -= 1
+
+    def _php_result(self, frame: Request, seq: int) -> object:
+        if frame.get("seq") != seq:
+            msg = f"PHP answered callback call {frame.get('seq')!r} while call {seq} was waiting"
+            raise RuntimeError(msg)
+        # Decode the result before applying releases: PHP drops its proxy right
+        # after encoding it, so a returned proxy is often released in this frame.
+        value = (
+            decode(frame.get("value"), self.registry, self._callback_for)
+            if frame.get("ok") is True
+            else None
+        )
+        release = frame.get("release", [])
+        self.registry.release(
+            [_require_int(i, "release id") for i in _require_list(release, "release")]
+        )
+        if frame.get("ok") is True:
+            return value
+        error = frame.get("error")
+        if not isinstance(error, dict):
+            msg = "PHP reported a failed callback without details"
+            raise ProtocolError(msg)
+        return_id = error.get("id")
+        raise PhpError(
+            str(error.get("class", "Exception")),
+            str(error.get("message", "")),
+            return_id if isinstance(return_id, int) else seq,
+        )
+
+    def _callback_for(self, callback_id: int) -> PhpCallable:
+        """One PhpCallable per PHP closure id, released (to PHP) when Python drops it."""
+        existing = self._callables.get(callback_id)
+        if existing is not None:
+            return existing
+        # PHP is sending this id again, so a release queued for it is stale.
+        self._released_callbacks = [i for i in self._released_callbacks if i != callback_id]
+        callback = PhpCallable(self, callback_id)
+        self._callables[callback_id] = callback
+        weakref.finalize(callback, self.queue_callback_release, callback_id)
+        return callback
+
+    def queue_callback_release(self, callback_id: int) -> None:
+        self._released_callbacks.append(callback_id)
+
+    def _with_releases(self, message: dict[str, object]) -> dict[str, object]:
+        """Tell PHP which closures Python no longer needs, with the next message."""
+        if self._released_callbacks:
+            message["release_callbacks"] = self._released_callbacks
+            self._released_callbacks = []
+        return message
 
     # -- helpers -------------------------------------------------------------- #
 
@@ -558,15 +764,19 @@ class Session:
         if key not in request:
             msg = f"missing field {key!r}"
             raise ProtocolError(msg)
-        return decode(request[key], self.registry)
+        return decode(request[key], self.registry, self._callback_for)
 
     def _call_args(self, request: Request) -> tuple[list[object], dict[str, object]]:
-        args = decode(_require_list(request.get("args", []), "args"), self.registry)
+        args = decode(
+            _require_list(request.get("args", []), "args"), self.registry, self._callback_for
+        )
         raw_kwargs = request.get("kwargs", {})
         if not isinstance(raw_kwargs, dict):
             msg = "kwargs must be an object"
             raise ProtocolError(msg)
-        kwargs = {str(k): decode(v, self.registry) for k, v in raw_kwargs.items()}
+        kwargs = {
+            str(k): decode(v, self.registry, self._callback_for) for k, v in raw_kwargs.items()
+        }
         assert isinstance(args, list)  # noqa: S101  # decode of a list is a list
         return args, kwargs
 
@@ -587,6 +797,7 @@ class Session:
             "python": sys.version.split()[0],
             "executable": sys.executable,
             "objects": len(self.registry),
+            "callbacks": len(self._callables),
         }
 
     def _exec(self, request: Request) -> object:
@@ -874,6 +1085,9 @@ def _error_response(
         "message": str(error),
         "traceback": "",
     }
+    if isinstance(error, PhpError):
+        # Lets PHP rethrow the original PHP exception object.
+        details["php_error"] = error.error_id
     if with_traceback:
         # Drop the worker's own frames so the traceback starts at user code.
         tb = error.__traceback__
@@ -913,55 +1127,89 @@ def _recv_exact(sock: socket.socket, size: int) -> bytes | None:
     return bytes(data)
 
 
-def _send(sock: socket.socket, message: Response, max_frame: int) -> None:
-    body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
-    if len(body) > max_frame:
-        too_large = ProtocolError(
-            f"the response is {len(body)} bytes, above the {max_frame}-byte limit; "
-            "keep the value in Python (use a reference) or raise max_message_bytes"
-        )
-        out = message.get("out")
-        body = json.dumps(
-            _error_response(
-                "too_large", too_large, io.StringIO(out if isinstance(out, str) else "")
-            ),
-            ensure_ascii=False,
-        ).encode("utf-8")
-    sock.sendall(HEADER.pack(len(body)) + body)
+class Connection:
+    """Length-prefixed JSON frames over the socket to PHP."""
+
+    def __init__(self, sock: socket.socket, max_frame: int) -> None:
+        self.sock = sock
+        self.max_frame = max_frame
+
+    def send(self, message: Response) -> None:
+        """Send a response; one that is too large is replaced by an error response."""
+        body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        if len(body) > self.max_frame:
+            too_large = ProtocolError(
+                f"the response is {len(body)} bytes, above the {self.max_frame}-byte limit; "
+                "keep the value in Python (use a reference) or raise max_message_bytes"
+            )
+            out = message.get("out")
+            body = json.dumps(
+                _error_response(
+                    "too_large", too_large, io.StringIO(out if isinstance(out, str) else "")
+                ),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        self.sock.sendall(HEADER.pack(len(body)) + body)
+
+    def send_call(self, message: dict[str, object]) -> None:
+        """Send a callback call; one that is too large raises ConversionError."""
+        body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        if len(body) > self.max_frame:
+            msg = (
+                f"the arguments of a PHP callback are {len(body)} bytes, above the "
+                f"{self.max_frame}-byte limit; pass a reference instead"
+            )
+            raise ConversionError(msg)
+        self.sock.sendall(HEADER.pack(len(body)) + body)
+
+    def receive(self) -> Request | None:
+        """The next frame from PHP, or None when PHP closed the connection."""
+        header = _recv_exact(self.sock, HEADER.size)
+        if header is None:
+            return None
+        (length,) = HEADER.unpack(header)
+        if length > self.max_frame:
+            msg = f"request of {length} bytes exceeds the limit"
+            raise FatalFrameError(msg)
+        body = _recv_exact(self.sock, length)
+        if body is None:
+            return None
+        try:
+            request = json.loads(body)
+        except ValueError:
+            msg = "request is not valid JSON"
+            raise FatalFrameError(msg) from None
+        if not isinstance(request, dict):
+            msg = "request is not a JSON object"
+            raise FatalFrameError(msg)
+        return request
 
 
 def serve(sock: socket.socket, token: str, max_frame: int) -> int:
-    session = Session()
-    _send(
-        sock,
+    connection = Connection(sock, max_frame)
+    session = Session(bridge=connection)
+    connection.send(
         {
             "op": "hello",
             "token": token,
             "protocol": PROTOCOL_VERSION,
             "python": sys.version.split()[0],
             "pid": os.getpid(),
-        },
-        max_frame,
+        }
     )
-    while True:
-        header = _recv_exact(sock, HEADER.size)
-        if header is None:
-            return 0
-        (length,) = HEADER.unpack(header)
-        if length > max_frame:
-            sys.stderr.write(f"pyhp: request of {length} bytes exceeds the limit, stopping\n")
-            return 2
-        body = _recv_exact(sock, length)
-        if body is None:
-            return 0
-        request = json.loads(body)
-        if not isinstance(request, dict):
-            sys.stderr.write("pyhp: request is not a JSON object, stopping\n")
-            return 2
-        response = session.handle(request)
-        _send(sock, response, max_frame)
-        if request.get("op") == "shutdown":
-            return 0
+    try:
+        while True:
+            request = connection.receive()
+            if request is None:
+                return 0
+            connection.send(session.handle(request))
+            if request.get("op") == "shutdown":
+                return 0
+    except WorkerExit:
+        return 0
+    except FatalFrameError as error:
+        sys.stderr.write(f"pyhp: {error}, stopping\n")
+        return 2
 
 
 def _authenticated(conn: socket.socket, token: str, timeout: float) -> bool:

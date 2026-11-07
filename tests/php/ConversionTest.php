@@ -94,7 +94,6 @@ test('nested unconvertible values become nested proxies', function (): void {
 test('PHP values without a Python equivalent are rejected', function (mixed $value, string $message): void {
     expect(fn () => $this->py->functions->echo($value))->toThrow(ConversionException::class, $message);
 })->with([
-    'closure' => [fn () => 1, 'Closure'],
     'object' => [new DateTimeImmutable, 'DateTimeImmutable'],
     'resource' => [STDIN, 'resource'],
 ]);

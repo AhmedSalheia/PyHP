@@ -247,7 +247,7 @@ def test_malformed_requests_are_protocol_errors(session: Session) -> None:
 def test_ping_reports_protocol_version(session: Session) -> None:
     value = ok_value(session.handle({"op": "ping"}))
     assert isinstance(value, dict)
-    assert value["protocol"] == 1
+    assert value["protocol"] == 2
 
 
 def test_calling_non_callables_is_a_type_error(session: Session) -> None:

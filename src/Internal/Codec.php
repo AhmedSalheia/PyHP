@@ -27,8 +27,10 @@ final class Codec
 {
     public const MAX_DEPTH = 256;
 
+    // Values are checked for valid UTF-8 one by one (invalid strings travel as
+    // bytes); the substitute flag only protects free text such as error messages.
     private const JSON_ENCODE_FLAGS = JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE
-        | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION;
+        | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_INVALID_UTF8_SUBSTITUTE;
 
     /** @var (Closure(PyObject): array{0: Session, 1: int})|null */
     private static ?Closure $unwrap = null;
@@ -103,9 +105,7 @@ final class Codec
             ],
             $value instanceof Slice => ['$t' => 'slice', 'v' => [$value->start, $value->stop, $value->step]],
             $value instanceof Dict => $this->encodeDict($value->items, $depth),
-            $value instanceof Closure => throw new ConversionException(
-                'A PHP Closure cannot be passed to Python (callbacks are not supported yet).'
-            ),
+            $value instanceof Closure => ['$t' => 'callback', 'id' => $this->session->callbackId($value)],
             default => throw new ConversionException(sprintf(
                 'A PHP %s cannot be sent to Python. Send scalars, arrays, Python object proxies, '
                 .'or Py::tuple()/Py::slice()/Py::dict() values.',
@@ -157,6 +157,7 @@ final class Codec
 
         return match ($tag) {
             'ref' => $this->decodeRef($data),
+            'callback' => $this->session->callback(is_int($data['id'] ?? null) ? $data['id'] : -1),
             'dict' => $this->decodeDict($data['o'] ?? null),
             'bytes' => $this->decodeBytes($raw),
             'float' => match ($raw) {

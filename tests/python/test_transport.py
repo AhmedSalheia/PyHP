@@ -99,7 +99,7 @@ def test_worker_sends_hello_with_token_first(worker: Connection) -> None:
     hello = worker.receive()
     assert hello["op"] == "hello"
     assert hello["token"] == TOKEN
-    assert hello["protocol"] == 1
+    assert hello["protocol"] == 2
 
 
 def test_worker_answers_requests_and_keeps_state(worker: Connection) -> None:
@@ -224,3 +224,50 @@ def test_worker_gives_up_when_nobody_connects(tmp_path: Path) -> None:
     process, _, log = launch(tmp_path, startup_timeout=0.5)
     assert process.wait(timeout=10) == 3
     assert "did not connect" in log.read_text()
+
+
+def test_callbacks_round_trip_over_the_socket(worker: Connection) -> None:
+    worker.receive()
+    worker.send({"op": "exec", "code": "def run(f, x):\n    return f(x) + 1"})
+    worker.receive()
+    worker.send(
+        {
+            "op": "call_global",
+            "name": "run",
+            "args": [{"$t": "callback", "id": 1}, 41],
+            "kwargs": {},
+        }
+    )
+    php_call = worker.receive()
+    assert php_call["op"] == "php_call"
+    assert php_call["args"] == [41]
+    worker.send({"op": "eval", "expr": "2 * 3"})  # PHP calls Python inside the callback
+    assert worker.receive()["value"] == 6
+    worker.send({"op": "php_return", "seq": php_call["seq"], "ok": True, "value": 100})
+    assert worker.receive()["value"] == 101
+
+
+def test_closing_the_connection_during_a_callback_stops_the_worker(worker: Connection) -> None:
+    worker.receive()
+    worker.send({"op": "exec", "code": "def run(f):\n    return f()"})
+    worker.receive()
+    callback = {"$t": "callback", "id": 1}
+    worker.send({"op": "call_global", "name": "run", "args": [callback], "kwargs": {}})
+    assert worker.receive()["op"] == "php_call"
+    worker.sock.close()
+    assert worker.process.wait(timeout=10) == 0
+
+
+def test_oversized_callback_arguments_are_refused(tmp_path: Path) -> None:
+    connection = start_worker(tmp_path, max_frame=2000)
+    connection.receive()
+    connection.send({"op": "exec", "code": "def run(f):\n    return f('x' * 5000)"})
+    connection.receive()
+    callback = {"$t": "callback", "id": 1}
+    connection.send({"op": "call_global", "name": "run", "args": [callback], "kwargs": {}})
+    response = connection.receive()
+    error = response["error"]
+    assert isinstance(error, dict)
+    assert error["kind"] == "conversion"
+    connection.sock.close()
+    connection.process.wait(timeout=10)
