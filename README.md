@@ -807,4 +807,4 @@ See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Next
 
 ## License
 
-Not chosen yet. Until a license is added, all rights are reserved by the author.
+PyHP is open-source software licensed under the [MIT license](LICENSE).
