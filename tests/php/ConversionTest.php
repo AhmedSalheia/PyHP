@@ -110,3 +110,22 @@ test('deeply nested PHP arrays are rejected', function (): void {
 
     expect(fn () => $this->py->functions->echo($deep))->toThrow(ConversionException::class, 'deep');
 });
+
+test('a Python dict with a "$t" key arrives as a normal array', function (): void {
+    expect($this->py->eval('{"$t": "not a tag", "a": [1]}'))->toBe(['$t' => 'not a tag', 'a' => [1]]);
+});
+
+test('copying plain data needs little more memory than the result itself', function (): void {
+    $this->py->exec("rows = [{'id': i, 'name': 'row', 'score': i / 3} for i in range(20000)]");
+    gc_collect_cycles();
+    $before = memory_get_usage();
+    memory_reset_peak_usage();
+
+    $rows = $this->py->vars->rows;
+
+    $kept = memory_get_usage() - $before;
+    $peak = memory_get_peak_usage() - $before;
+    expect(count($rows))->toBe(20000)
+        ->and($rows[19999])->toBe(['id' => 19999, 'name' => 'row', 'score' => 19999 / 3])
+        ->and($peak)->toBeLessThan($kept * 2);
+});

@@ -553,10 +553,29 @@ try {
 
 ## Performance
 
-Measured on the Linux test machine (2 vCPU, PHP 8.3, Python 3.13, pandas 3.0). **Windows numbers will differ and have not been measured.** Process start-up in particular is usually slower on Windows.
+Measured with [`benchmarks/overhead.php`](benchmarks/overhead.php). Run it yourself, without Xdebug coverage: `php benchmarks/overhead.php path\to\python.exe`.
 
-| Operation | Time |
-|---|---|
+| Operation | Linux (PHP 8.3, Python 3.13, 2 vCPU) | Windows (PHP 8.4, Python 3.11 venv) |
+|---|---|---|
+| Start a session (no imports) | ~36 ms | ~175 ms (Python alone needs ~120 ms there) |
+| One round trip (`eval('1')`) | ~74 µs | ~87 µs |
+| Attribute read on a proxy | ~63 µs | ~76 µs |
+| `import pandas` (first time in a session) | ~190 ms | ~330 ms |
+| 1,000,000-row `groupby().mean().to_dict()` via 4 proxy calls | ~16 ms | ~16 ms |
+| …the same as one `eval()` | ~9 ms | ~13 ms |
+| Copy 100,000 rows × 2 columns to PHP (`to_dict('records')`) | ~400 ms | ~630 ms |
+| `close()` with pandas loaded | ~72 ms | ~73 ms |
+
+What that means:
+
+* **Per-call overhead is negligible for DataFrame-level work.** Going through 4 proxies instead of one Python expression costs a few milliseconds on a 1M-row groupby.
+* **Per-call overhead dominates chatty code.** 10,000 attribute reads ≈ 1 s. Don't loop over rows from PHP; let pandas/NumPy do it, or write the loop in Python.
+* **Copying is the expensive part, in time and in memory.** Data travels as JSON, and the PHP copy of a table is several times bigger than the DataFrame: 100k rows × 4 columns take about **53 MB** as PHP arrays, with a peak of about 60 MB while decoding. PHP's default `memory_limit` of 128 MB (on Windows `php.ini`) is reached at roughly 200k rows of that shape. Copy summaries, not datasets; for large outputs, write a file from Python (`to_csv`, `to_parquet`).
+* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call. Python itself starts more slowly on Windows (~110 ms on the test machine vs ~13 ms on Linux).
+
+The per-call figure is in line with other process-based bridges. In-process embedding (swoole/phpy) is far faster per call; see [the comparison](#pyhp-vs-swoolephpy).
+
+---|---|
 | Start a session (no imports) | ~37 ms |
 | One round trip (`eval('1')`, attribute read, method call) | ~70–100 µs |
 | `import pandas` (first time in a session) | ~210 ms |
@@ -603,7 +622,7 @@ The per-call figure is in line with other process-based bridges. In-process embe
   $py->functions->process($_GET['name']);
   ```
 
-* The worker listens on nothing. PHP opens a socket on `127.0.0.1` with a random port, the worker connects to it, and the server socket is closed right after. The worker must present a random 128-bit token, so another local process can't take its place. Local processes running as **your own user** could still inspect the worker (environment variables, memory), as with any process.
+* The worker listens on `127.0.0.1` only (never on the network), on a random port, and only until PHP has connected; then it closes the listener. The first message on a connection must contain a random 128-bit token that only the PHP process that started the worker knows. Any other connection is dropped without a reply, and a worker that nobody connects to within `startup_timeout` exits. Local processes running as **your own user** could still inspect the worker (environment variables, memory), as with any process.
 * The token and PyHP's own variables (`PYHP_*`) are removed from `os.environ` before your code runs.
 * PyHP never logs your code, arguments, or variables. The worker log contains only what Python writes to stderr.
 
@@ -699,10 +718,10 @@ Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` 
                                                └───────────────────────────────────────┘
 ```
 
-1. **Start:** PHP opens a server socket on `127.0.0.1` (random port) and starts `python -u pyhp_worker.py` with `proc_open()` and an argument array, with no shell involved. Port, token and limits are passed in environment variables.
-2. **Handshake:** the worker connects, sends `hello` with the token and protocol version. PHP checks both, then closes the server socket.
+1. **Start:** PHP starts `python -u pyhp_worker.py` with `proc_open()` and an argument array, with no shell involved. The token, limits and the path of a temporary *port file* are passed in environment variables.
+2. **Handshake:** the worker listens on `127.0.0.1` (random port) and writes the port to the port file. PHP connects and sends `{"op": "auth", "token": …}`. The worker checks the token, closes its listener, and answers `hello` with the protocol version, which PHP checks. The worker listens rather than PHP because, on Windows, PHP waits 500 ms every time it closes a listening socket.
 3. **Requests:** each frame is a 4-byte big-endian length plus UTF-8 JSON, e.g. `{"op": "call_method", "ref": 7, "name": "head", "args": [3], "kwargs": {}}`. The worker runs it, captures `print()` output, and answers `{"ok": true, "value": …, "out": "…"}` or `{"ok": false, "error": {"kind", "type", "message", "traceback"}}`.
-4. **Values:** JSON natives travel as-is. Other values are tagged objects: `{"$t": "ref", "id": 7, "type": "pandas.DataFrame"}`, `{"$t": "dict", "v": [[key, value], …]}`, `{"$t": "bytes", "v": "<base64>"}`, `{"$t": "float", "v": "nan"}`, `{"$t": "tuple", …}`, `{"$t": "slice", …}`.
+4. **Values:** JSON natives travel as-is, and Python dicts travel as plain JSON objects, so PHP's `json_decode()` produces the final array directly. Every response carries a `tagged` flag; when it's `false` (no references, bytes or NaN/Inf anywhere in the value), PHP uses that array as-is, without a second pass or a second copy. Other values are tagged objects: `{"$t": "ref", "id": 7, "type": "pandas.DataFrame"}`, `{"$t": "bytes", "v": "<base64>"}`, `{"$t": "float", "v": "nan"}`, and `{"$t": "dict", "o": {…}}` for the rare Python dict that itself has a `"$t"` key. From PHP to Python, dicts travel as `{"$t": "dict", "v": [[key, value], …]}` so integer keys stay integers, plus `{"$t": "tuple", …}` and `{"$t": "slice", …}`.
 5. **Releases:** IDs of freed proxies ride along on the next request (`"release": [7, 9]`).
 6. **Timeouts:** PHP waits with `stream_select()` against one deadline per call. On expiry the worker is killed.
 

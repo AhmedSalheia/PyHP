@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import builtins
 import contextlib
+import hmac
 import importlib
 import io
 import json
@@ -28,6 +29,7 @@ import re
 import socket
 import struct
 import sys
+import time
 import tokenize
 import traceback
 import types
@@ -41,6 +43,8 @@ MAX_DEPTH: Final = 256
 DEFAULT_MAX_FRAME: Final = 64 * 1024 * 1024
 NAMESPACE_MODULE: Final = "__pyhp__"
 HEADER: Final = struct.Struct(">I")
+AUTH_TIMEOUT: Final = 5.0
+MAX_AUTH_FRAME: Final = 4096
 
 # PHP converts string keys that look like canonical decimal integers into int keys.
 _PHP_INT_KEY: Final = re.compile(r"^(0|-?[1-9][0-9]*)$")
@@ -106,6 +110,25 @@ class _UnconvertibleError(Exception):
     """Internal signal: this value has to stay in Python."""
 
 
+class _EncodeState:
+    """Bookkeeping for one conversion."""
+
+    def __init__(self, registry: Registry, strict: bool) -> None:
+        self.registry = registry
+        self.strict = strict
+        self.path: set[int] = set()
+        # Whether any tagged value was produced. If not, PHP can use json_decode's
+        # result as-is instead of walking it again (saves time and a full copy).
+        self.tagged = False
+
+    def tag(self, value: Json) -> Json:
+        self.tagged = True
+        return value
+
+    def ref(self, value: object) -> Json:
+        return self.tag(_ref(value, self.registry))
+
+
 def encode(value: object, registry: Registry, *, strict: bool = False) -> Json:
     """Convert a Python value for PHP.
 
@@ -114,41 +137,56 @@ def encode(value: object, registry: Registry, *, strict: bool = False) -> Json:
 
     Strict mode (``to_php``): subclasses of built-ins and sets are also copied;
     anything that would need a reference raises ``ConversionError``.
+
+    Dicts become plain JSON objects, which PHP decodes straight into arrays. A
+    dict that itself has a "$t" key is wrapped ({"$t": "dict", "o": {...}}) so
+    it can't be mistaken for a tagged value.
     """
-    return _encode(value, registry, strict, 0, set())
+    return encode_value(value, registry, strict=strict)[0]
+
+
+def encode_value(value: object, registry: Registry, *, strict: bool = False) -> tuple[Json, bool]:
+    """Like ``encode``, also saying whether the result contains any tagged value."""
+    state = _EncodeState(registry, strict)
+    result = _encode(value, state, 0)
+    return result, state.tagged
 
 
 def _ref(value: object, registry: Registry) -> Json:
     return {"$t": "ref", "id": registry.add(value), "type": type_name(value)}
 
 
-def _encode(value: object, registry: Registry, strict: bool, depth: int, path: set[int]) -> Json:
+def _encode(value: object, state: _EncodeState, depth: int) -> Json:
     try:
-        scalar = _encode_scalar(value, strict)
+        scalar = _encode_scalar(value, state.strict)
     except _UnconvertibleError:
         pass
     else:
+        if isinstance(scalar, dict):  # bytes or a special float
+            state.tagged = True
         return scalar
 
-    if _is_container(value, strict):
-        if id(value) in path or depth >= MAX_DEPTH:
-            if strict:
-                reason = "a reference cycle" if id(value) in path else "nesting deeper than 256"
+    if _is_container(value, state.strict):
+        if id(value) in state.path or depth >= MAX_DEPTH:
+            if state.strict:
+                reason = (
+                    "a reference cycle" if id(value) in state.path else "nesting deeper than 256"
+                )
                 msg = f"cannot convert {type_name(value)} containing {reason}"
                 raise ConversionError(msg)
-            return _ref(value, registry)
-        path.add(id(value))
+            return state.ref(value)
+        state.path.add(id(value))
         try:
-            converted = _encode_container(value, registry, strict, depth, path)
+            converted = _encode_container(value, state, depth)
         finally:
-            path.discard(id(value))
+            state.path.discard(id(value))
         if converted is not None:
             return converted
 
-    if strict:
+    if state.strict:
         msg = f"cannot convert a {type_name(value)} to a PHP value"
         raise ConversionError(msg)
-    return _ref(value, registry)
+    return state.ref(value)
 
 
 def _encode_scalar(value: object, strict: bool) -> Json:  # one flat type switch
@@ -204,24 +242,26 @@ def _is_container(value: object, strict: bool) -> bool:
     return type(value) in (list, tuple, dict)
 
 
-def _encode_container(
-    value: object, registry: Registry, strict: bool, depth: int, path: set[int]
-) -> Json:
+def _encode_container(value: object, state: _EncodeState, depth: int) -> Json:
+    """Encode a list/tuple/set/dict, or return None if PHP can't hold this dict."""
     if isinstance(value, dict):
-        pairs: list[Json] = []
+        # Check every key before encoding any value, so a dict that has to stay in
+        # Python doesn't leave references to its values behind in the registry.
         seen_keys: set[int | str] = set()
-        for key, item in value.items():
-            php_key = _php_key(key, strict)
+        for key in value:
+            php_key = _php_key(key, state.strict)
             if php_key is None or php_key in seen_keys:
-                if strict:
+                if state.strict:
                     msg = f"cannot convert dict key {key!r} to a distinct PHP array key"
                     raise ConversionError(msg)
                 return None
             seen_keys.add(php_key)
-            pairs.append([key, _encode(item, registry, strict, depth + 1, path)])
-        return {"$t": "dict", "v": pairs}
+        obj: dict[str, Json] = {
+            str(key): _encode(item, state, depth + 1) for key, item in value.items()
+        }
+        return state.tag({"$t": "dict", "o": obj}) if "$t" in obj else obj
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [_encode(item, registry, strict, depth + 1, path) for item in value]
+        return [_encode(item, state, depth + 1) for item in value]
     return None
 
 
@@ -304,8 +344,9 @@ Handler: TypeAlias = Callable[[Request], object]
 class _Raw:
     """Marks a handler result that is already wire-encoded."""
 
-    def __init__(self, value: Json) -> None:
+    def __init__(self, value: Json, tagged: bool) -> None:
         self.value = value
+        self.tagged = tagged
 
 
 class _Subscriptable(Protocol):
@@ -359,7 +400,7 @@ class Session:
             "repr": lambda r: repr(self._target(r)),
             "len": lambda r: len(self._sized(r)),
             "type": lambda r: type_name(self._target(r)),
-            "to_php": lambda r: _Raw(encode(self._target(r), self.registry, strict=True)),
+            "to_php": lambda r: _Raw(*encode_value(self._target(r), self.registry, strict=True)),
             "iter": lambda r: self._as_ref(iter(self._iterable(r))),
             "next_batch": self._next_batch,
         }
@@ -380,7 +421,10 @@ class Session:
                 raise ProtocolError(msg)
             with contextlib.redirect_stdout(output):
                 result = handler(request)
-            value = result.value if isinstance(result, _Raw) else encode(result, self.registry)
+            if isinstance(result, _Raw):
+                value, tagged = result.value, result.tagged
+            else:
+                value, tagged = encode_value(result, self.registry)
         except ProtocolError as error:
             return _error_response("protocol", error, output)
         except StaleReferenceError as error:
@@ -389,7 +433,7 @@ class Session:
             return _error_response("conversion", error, output)
         except BaseException as error:  # forwarded to PHP as PythonException
             return _error_response("python", error, output, with_traceback=True)
-        return {"ok": True, "value": value, "out": output.getvalue()}
+        return {"ok": True, "value": value, "tagged": tagged, "out": output.getvalue()}
 
     # -- helpers -------------------------------------------------------------- #
 
@@ -403,7 +447,7 @@ class Session:
         raise NameError(msg)
 
     def _as_ref(self, value: object) -> _Raw:
-        return _Raw(_ref(value, self.registry))
+        return _Raw(_ref(value, self.registry), tagged=True)
 
     def _target(self, request: Request) -> object:
         return self.registry.get(_require_int(request.get("ref"), "ref"))
@@ -684,10 +728,53 @@ def serve(sock: socket.socket, token: str, max_frame: int) -> int:
             return 0
 
 
+def _authenticated(conn: socket.socket, token: str, timeout: float) -> bool:
+    """The first frame on a new connection must be {"op": "auth", "token": <token>}."""
+    conn.settimeout(max(0.01, min(timeout, AUTH_TIMEOUT)))
+    try:
+        header = _recv_exact(conn, HEADER.size)
+        if header is None:
+            return False
+        (length,) = HEADER.unpack(header)
+        if length > MAX_AUTH_FRAME:
+            return False
+        body = _recv_exact(conn, length)
+        if body is None:
+            return False
+        message = json.loads(body)
+    except (OSError, ValueError):  # timeouts, resets, invalid JSON or UTF-8
+        return False
+    offered = message.get("token") if isinstance(message, dict) else None
+    return (
+        isinstance(message, dict)
+        and message.get("op") == "auth"
+        and isinstance(offered, str)
+        and hmac.compare_digest(offered.encode(), token.encode())
+    )
+
+
+def _accept_php(server: socket.socket, token: str, deadline: float) -> socket.socket | None:
+    """Wait for PHP to connect and authenticate. Other connections are dropped."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        server.settimeout(remaining)
+        try:
+            conn, _ = server.accept()
+        except TimeoutError:
+            return None
+        if _authenticated(conn, token, remaining):
+            conn.settimeout(None)
+            return conn
+        conn.close()
+
+
 def main() -> int:
-    port = int(os.environ.pop("PYHP_PORT"))
+    port_file = os.environ.pop("PYHP_PORT_FILE")
     token = os.environ.pop("PYHP_TOKEN")
     max_frame = int(os.environ.pop("PYHP_MAX_FRAME", str(DEFAULT_MAX_FRAME)))
+    startup_timeout = float(os.environ.pop("PYHP_STARTUP_TIMEOUT", "10"))
     extra_paths = os.environ.pop("PYHP_PATHS", "")
     # Like `python -c`: the working directory comes first on sys.path,
     # instead of the directory that contains this worker script.
@@ -695,7 +782,19 @@ def main() -> int:
     for path in reversed([p for p in extra_paths.split(os.pathsep) if p]):
         sys.path.insert(1, path)
     _isolate_stdio()
-    with socket.create_connection(("127.0.0.1", port)) as sock:
+
+    # The worker listens and PHP connects, not the other way round: on Windows,
+    # PHP waits 500 ms whenever it closes a listening socket.
+    with socket.create_server(("127.0.0.1", 0)) as server:
+        port = server.getsockname()[1]
+        # The trailing newline tells PHP the number is complete.
+        with open(port_file, "w", encoding="ascii") as handle:
+            handle.write(f"{port}\n")
+        sock = _accept_php(server, token, time.monotonic() + startup_timeout)
+    if sock is None:
+        sys.stderr.write("pyhp: PHP did not connect within the start-up timeout, stopping\n")
+        return 3
+    with sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return serve(sock, token, max_frame)
 

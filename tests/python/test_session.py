@@ -199,9 +199,9 @@ def test_iteration_happens_in_batches(session: Session) -> None:
     r = ref_id(ok_value(session.handle({"op": "get_var", "name": "r"})))
     iterator = ref_id(ok_value(session.handle({"op": "iter", "ref": r})))
     first = ok_value(session.handle({"op": "next_batch", "ref": iterator, "size": 3}))
-    assert first == {"$t": "dict", "v": [["items", [0, 1, 2]], ["done", False]]}
+    assert first == {"items": [0, 1, 2], "done": False}
     second = ok_value(session.handle({"op": "next_batch", "ref": iterator, "size": 3}))
-    assert second == {"$t": "dict", "v": [["items", [3, 4]], ["done", True]]}
+    assert second == {"items": [3, 4], "done": True}
 
 
 def test_released_references_become_stale(session: Session) -> None:
@@ -247,8 +247,7 @@ def test_malformed_requests_are_protocol_errors(session: Session) -> None:
 def test_ping_reports_protocol_version(session: Session) -> None:
     value = ok_value(session.handle({"op": "ping"}))
     assert isinstance(value, dict)
-    pairs = dict(cast("list[tuple[str, object]]", value["v"]))
-    assert pairs["protocol"] == 1
+    assert value["protocol"] == 1
 
 
 def test_calling_non_callables_is_a_type_error(session: Session) -> None:
@@ -302,3 +301,12 @@ def test_builtins_are_reachable_as_globals(session: Session) -> None:
     assert ok_value(result) == 2
     assert ok_value(session.handle({"op": "is_callable_global", "name": "sorted"})) is True
     assert ok_value(session.handle({"op": "has_var", "name": "len"})) is False
+
+
+def test_responses_say_whether_php_must_look_for_tags(session: Session) -> None:
+    plain = session.handle({"op": "eval", "expr": "[{'a': 1}]"})
+    assert plain["tagged"] is False
+    tagged = session.handle({"op": "eval", "expr": "[object()]"})
+    assert tagged["tagged"] is True
+    module = session.handle({"op": "import", "module": "math"})
+    assert module["tagged"] is True
