@@ -9,6 +9,10 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ## [@dev]
 
 ### Added
+- Real-world tests of `pyhp setup` in CI (`tests/smoke/setup-smoke.php`): on Linux, Windows and macOS, with uv (downloading Python) and with the system Python, a fresh Composer project installs PyHP, runs `pyhp setup` twice and `pyhp info`, and checks that a session runs in the new venv.
+- `TASKS.md`: the tasks of the current scope.
+
+### Added
 - `ROADMAP.md`: the plan for v0.3.0, v0.4.0 and the goals for v1.0.0.
 
 ### Changed
