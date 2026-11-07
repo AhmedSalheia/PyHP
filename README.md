@@ -30,19 +30,20 @@ print_r($totals->to_dict());                                // ['west' => 306861
 7. [How values are converted](#how-values-are-converted)
 8. [pandas and NumPy in practice](#pandas-and-numpy-in-practice)
 9. [PHP callbacks](#php-callbacks)
-10. [Printed output and the log](#printed-output-and-the-log)
-11. [Errors](#errors)
-12. [Object lifetime and memory](#object-lifetime-and-memory)
-13. [Performance](#performance)
-14. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
-15. [Security](#security)
-16. [Platform support](#platform-support)
-17. [Imports](#imports)
-18. [Every limitation in one list](#every-limitation-in-one-list)
-19. [How it works inside](#how-it-works-inside)
-20. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
-21. [Development](#development)
-22. [Roadmap](#roadmap)
+10. [SymPy and spaCy in practice](#sympy-and-spacy-in-practice)
+11. [Printed output and the log](#printed-output-and-the-log)
+12. [Errors](#errors)
+13. [Object lifetime and memory](#object-lifetime-and-memory)
+14. [Performance](#performance)
+15. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
+16. [Security](#security)
+17. [Platform support](#platform-support)
+18. [Imports](#imports)
+19. [Every limitation in one list](#every-limitation-in-one-list)
+20. [How it works inside](#how-it-works-inside)
+21. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
+22. [Development](#development)
+23. [Roadmap](#roadmap)
 
 ---
 
@@ -157,6 +158,9 @@ More complete, runnable examples are in [`examples/`](examples):
 | `02_vars_and_functions.php` | `execFile`, sharing variables, keyword arguments, `classes`, Python objects as proxies |
 | `03_pandas_report.php` | a full pandas report written in PHP syntax |
 | `04_numpy.php` | NumPy arrays, tuple indexes, slices, scalars |
+| `05_callbacks.php` | PHP closures called from Python: `sorted(key=...)`, pandas `apply`, exceptions |
+| `06_sympy.php` | SymPy: solving, calculus, LaTeX, exact values, `lambdify`, matrices |
+| `07_spacy_nlp.php` | spaCy: entities, sentences, lemmas, the Matcher, `nlp.pipe`, a PHP pipeline component, displaCy HTML |
 
 Run them with your interpreter:
 
@@ -618,6 +622,52 @@ Each callback is one round trip (~65 µs on Linux), the same as any other call. 
 | `$series->pipe(fn (PyObject $s) => $s->mul(2))`: one callback, pandas does the loop | ~0.7 ms |
 
 `pipe()` passes the whole Series (as a proxy) to your closure once, and you use pandas methods on it. When you need per-value logic on big data, write that function in Python instead.
+
+---
+
+## SymPy and spaCy in practice
+
+Any library works the same way: import it, call it through proxies, copy plain results into PHP. These two show the typical gotchas. Both are tested in CI (on Linux) by `tests/php/SympyTest.php` and `tests/php/SpacyTest.php`, which skip when the library isn't installed.
+
+### SymPy (symbolic math)
+
+```php
+$sp = $py->import('sympy', as: 'sp');
+$x = $sp->symbols('x');
+
+$sp->solve($sp->sympify('x**2 - 5*x + 6'), $x);         // [proxy 2, proxy 3]
+(string) $sp->diff($sp->sympify('x**3'), $x);            // '3*x**2'
+$sp->latex($sp->Integral($sp->sqrt($x), $x));            // '\int \sqrt{x}\, dx'
+$f = $sp->lambdify($x, $sp->sympify('x**2 + 1'));
+$f(3);                                                   // 10
+```
+
+* **SymPy numbers are proxies**, not PHP numbers: `Integer`, `Rational` and `Float` are SymPy classes, not Python `int`/`float`. Convert with `$py->functions->int($n)`, `$py->functions->float($n)` or `(string) $n` (exact: `'5/4'`).
+* Build expressions from strings with `sympify()`, or use method forms: there are no operators on proxies, so `x**2` is `$x->__pow__(2)`.
+* `solve()` for a system returns a dict keyed by `Symbol`s. Those can't be PHP array keys, so the dict stays a proxy; convert in Python: `$py->eval("{str(k): v for k, v in ...}")`.
+* `lambdify()` returns a plain Python function: call it from PHP like a closure.
+* Big symbolic computations can take seconds; raise `timeout` if needed.
+
+### spaCy (natural language processing)
+
+```php
+$spacy = $py->import('spacy');
+$nlp = $spacy->load('en_core_web_sm');                  // python -m spacy download en_core_web_sm
+$doc = $nlp('Tim Cook visited Ramallah on Monday.');
+
+foreach ($doc->ents as $e) { echo $e->text, ' ', $e->label_; }   // Tim Cook PERSON, Ramallah GPE, ...
+$tokens = $doc->to_json()['tokens'];                    // every token, one round trip
+```
+
+* **Load the model once** and reuse `$nlp`: `import spacy` takes ~0.5 s and loading the small model ~0.3 s; each `$nlp($text)` is then ~10 ms. Under PHP-FPM every request pays the load, so use spaCy from CLI scripts, queue workers or long-running PHP.
+* **Iterating tokens costs one round trip per attribute read.** For whole documents use `$doc->to_json()` (text, entities, sentences and every token's lemma/POS/tag/dep as plain arrays) or compute what you need in Python with `eval()`.
+* `spacy.blank('en')` gives a tokenizer without downloading a model.
+* Matcher patterns are plain PHP arrays: `[[['LIKE_NUM' => true], ['LOWER' => 'billion']]]`. Match ids are 64-bit unsigned hashes, larger than PHP ints, so they arrive as proxies; pass `as_spans: true` to get spans with `->label_` instead.
+* `$nlp->pipe($texts)` processes many texts in batches; iterate it lazily from PHP.
+* A PHP closure can be a pipeline component (register it with `Language.component(...)` in `exec`, then `$nlp->add_pipe(...)`). To store results on the doc, use a custom extension and write `$doc->_->name = ...`: `$doc->user_data` is a plain dict, so PHP gets a **copy** and `$doc->user_data['k'] = ...` changes nothing in Python.
+* `$spacy->displacy->render($doc, style: 'ent')` returns HTML you can put straight into a page.
+
+Other NLP libraries (NLTK, Hugging Face `transformers`, `sentence-transformers`, `langdetect`, …) follow the same pattern; the main thing to watch is load time, so keep one session alive and load models once.
 
 ---
 

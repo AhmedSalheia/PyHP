@@ -32,17 +32,31 @@ done
 Stage them completely (git add <file>) or stash the rest (git stash -k), then commit again."
 
 if [ -n "$php_files" ]; then
-    command -v php >/dev/null 2>&1 || fail "php is not on PATH."
+    # Git's shell only finds exact file names, so also look for the .exe/.bat/.cmd
+    # shims that Windows installers (Herd, Laragon, Scoop, XAMPP) put on PATH.
+    # Set PYHP_PHP to point at php yourself if it still isn't found.
+    php=${PYHP_PHP:-}
+    if [ -z "$php" ]; then
+        for candidate in php php.exe php.bat php.cmd; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                php=$candidate
+                break
+            fi
+        done
+    fi
+    [ -n "$php" ] || fail "php was not found on the PATH that Git sees.
+If php works in your terminal, commit from that terminal, restart VS Code, or set
+PYHP_PHP to its full path (e.g. setx PYHP_PHP C:/php/php.exe, then reopen the terminal)."
     [ -f vendor/bin/pint ] || fail "vendor/bin/pint is missing; run: composer install"
 
     echo "pre-commit: Pint"
     # shellcheck disable=SC2086 # file names are split on purpose (no spaces in this repo)
-    php vendor/bin/pint --quiet $php_files || fail "Pint could not format the staged PHP files."
+    "$php" vendor/bin/pint --quiet $php_files || fail "Pint could not format the staged PHP files."
     # shellcheck disable=SC2086
     git add $php_files
 
     echo "pre-commit: PHPStan"
-    php vendor/bin/phpstan analyse --no-progress --memory-limit=1G \
+    "$php" vendor/bin/phpstan analyse --no-progress --memory-limit=1G \
         || fail "PHPStan found problems (see above)."
 fi
 
