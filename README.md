@@ -15,7 +15,7 @@ $totals = $big->groupby('region')['revenue']->sum()->sort_values(ascending: fals
 print_r($totals->to_dict());                                // ['west' => 306861.5, ...]
 ```
 
-> **Status: MVP (0.x, unreleased).** The design works and is tested on Linux with real pandas and NumPy. Windows is the main target but **has not been run yet** (see [Platform support](#platform-support)). APIs may still change, and the import API is still [open for discussion](#imports-provisional).
+> **Status: MVP (0.x, unreleased).** Tested on Linux and Windows with real pandas and NumPy (see [Platform support](#platform-support)). APIs may still change before the first release.
 
 ---
 
@@ -36,7 +36,7 @@ print_r($totals->to_dict());                                // ['west' => 306861
 13. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
 14. [Security](#security)
 15. [Platform support](#platform-support)
-16. [Imports (provisional)](#imports-provisional)
+16. [Imports](#imports)
 17. [Every limitation in one list](#every-limitation-in-one-list)
 18. [How it works inside](#how-it-works-inside)
 19. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
@@ -153,7 +153,7 @@ More complete, runnable examples are in [`examples/`](examples):
 | File | Shows |
 |---|---|
 | `01_basics.php` | exec, eval, printed output, catching Python errors |
-| `02_vars_and_functions.php` | `execFile`, sharing variables, keyword arguments, Python classes as proxies |
+| `02_vars_and_functions.php` | `execFile`, sharing variables, keyword arguments, `classes`, Python objects as proxies |
 | `03_pandas_report.php` | a full pandas report written in PHP syntax |
 | `04_numpy.php` | NumPy arrays, tuple indexes, slices, scalars |
 
@@ -223,7 +223,7 @@ When the last PHP reference to a proxy disappears, the Python object is released
 | `Py::session(array $overrides = []): Session` | A new independent session. `$overrides` apply to this session only. |
 | `Py::default(): Session` | A shared default session, started on first use and restarted automatically if it was closed. |
 | `Py::reset(bool $forgetConfig = false)` | Close the default session. With `forgetConfig: true` also go back to default options. |
-| `Py::exec()`, `Py::execFile()`, `Py::eval()`, `Py::import()`, `Py::vars()`, `Py::functions()` | Shortcuts to the same methods on `Py::default()`. |
+| `Py::exec()`, `Py::execFile()`, `Py::eval()`, `Py::import()`, `Py::vars()`, `Py::functions()`, `Py::modules()`, `Py::classes()` | Shortcuts to the same methods on `Py::default()`. |
 | `Py::tuple(...$items)` | A value sent as a Python `tuple`. |
 | `Py::slice($start, $stop = null, $step = null)` | A value sent as a Python `slice`: `Py::slice(1, 3)` is `1:3`, `Py::slice(null, null, -1)` is `::-1`. |
 | `Py::dict(array $items)` | A value sent as a Python `dict`, even if the array is empty or list-shaped. |
@@ -231,6 +231,8 @@ When the last PHP reference to a proxy disappears, the Python object is released
 | `Py::repr(PyObject $o): string` | Python `repr(o)`. |
 | `Py::type(PyObject $o): string` | The Python type, e.g. `pandas.DataFrame`, `int`, `__pyhp__.Invoice`. |
 | `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets and subclasses of dict/list/str/int/float. Throws instead of returning nested proxies. |
+| `Py::rows(PyObject $df): array` | A pandas DataFrame as a list of rows, fast and `json_encode()`-ready; see [Copying tables into PHP](#copying-tables-into-php). |
+| `Py::columns(PyObject $df): array` | The same as one list per column: the most compact copy. |
 
 > `Py::config()` does **not** change a default session that is already running. Call `Py::reset()` after changing options if you want the default session to pick them up.
 
@@ -263,7 +265,9 @@ You can also build a `Config` directly with named arguments: `new Session(new Co
 | `exec(string $code): void` | Run Python statements in the session namespace. |
 | `execFile(string $path): void` | Run a `.py` file **in the session namespace**: what it defines becomes available through `vars` and `functions`. Relative paths are resolved from PHP's current directory. |
 | `eval(string $expression): mixed` | Evaluate one expression and return its value. |
-| `import(string $module, ?string $as = null): PyObject` | Import a module and return a proxy. With `$as`, also bind it to that name in the namespace (like `import pandas as pd`). |
+| `import(string $module, ?string $as = null, ?string $from = null): mixed` | Import like Python and bind the name in the session; see [Imports](#imports). |
+| `$modules` | Modules bound in the session (see below). |
+| `$classes` | Python classes, to create instances (see below). |
 | `$vars` | Global variables (see below). |
 | `$functions` | Global callables (see below). |
 | `takeOutput(): string` | In capture mode, the text printed since the last call to `takeOutput()`; then clears it. |
@@ -308,7 +312,7 @@ $py->vars->{'odd name'};        // any string works as a name
 ```php
 $py->functions->greet('Ahmed');                  // greet('Ahmed')
 $py->functions->greet('Ahmed', excited: true);   // greet('Ahmed', excited=True)
-$py->functions->Invoice('Ahmed');                // classes are callables: returns a proxy
+$py->functions->Invoice('Ahmed');                // classes are callables too (prefer $py->classes)
 $py->functions->len([1, 2, 3]);                  // builtins work: 3
 $fn = $py->functions->greet;                     // a callable proxy for later: $fn('Sam')
 isset($py->functions->greet);                    // exists and is callable?
@@ -317,7 +321,37 @@ isset($py->functions->greet);                    // exists and is callable?
 * PHP **named arguments become Python keyword arguments**. Positional arguments must come before named ones, which PHP enforces anyway.
 * You can also spread an array: `$py->functions->f(...['a' => 1, 'b' => 2])`. String keys become keyword arguments, so keys don't even need to be valid PHP identifiers.
 * `functions` has no ordinary PHP methods, so every Python name is reachable, whatever it's called.
-* `classes`, a dedicated namespace for Python classes, is a planned addition. Today, use `functions->ClassName(...)` to instantiate.
+* `functions` accepts anything callable, classes included. Use `classes` when you mean "create an instance": it refuses non-classes, which catches mistakes.
+
+### `classes`: Python classes
+
+```php
+$py->exec('class Invoice: ...');                 // or import one: $py->import('Decimal', from: 'decimal')
+$invoice = $py->classes->Invoice('Ahmed', currency: 'ILS');   // Invoice('Ahmed', currency='ILS') → proxy
+$py->classes->dict(a: 1);                        // builtin classes work: ['a' => 1]
+$cls = $py->classes->Invoice;                    // the class itself, as a proxy: $cls('Sam'), $cls->__name__
+isset($py->classes->Invoice);                    // is "Invoice" a class?
+$py->classes->names();                           // ['Invoice', ...] — your own and imported classes, not builtins
+```
+
+* Calling or fetching a name that isn't a class throws `PythonException` (`TypeError: 'make' is a function, not a class`), or `NameError` if the name doesn't exist.
+* Static methods and class attributes go through the class proxy: `$py->classes->Invoice->from_dict([...])`.
+* `$py->classes->X = ...` throws `LogicException`: define classes with `exec()`/`execFile()` or import them.
+* `names()` is a PHP method. A Python class called `names` is still reachable as `$py->classes->names` (no parentheses) or `$py->classes->__call('names', [...])`.
+
+### `modules`: imported modules
+
+```php
+$py->import('pandas', as: 'pd');
+$py->exec('import json');
+$py->modules->names();                           // ['pd', 'json'] — every name bound to a module
+$py->modules->pd->read_csv('sales.csv');         // the module bound as "pd"
+isset($py->modules->json);                       // is "json" bound to a module?
+```
+
+* The container shows the session namespace as it is: modules added with `import()` **and** modules imported inside `exec()`/`execFile()` code, under the names they're bound to (aliases included).
+* Reading a name that isn't bound to a module throws `PythonException` (`TypeError` or `NameError`). Nothing is imported implicitly: use `$py->import()` to add modules.
+* `$py->modules->x = ...` throws `LogicException`.
 
 ### `PyObject`: the proxy
 
@@ -427,7 +461,7 @@ $row['when']->isoformat();    // "2024-01-02"
 ### The pattern
 
 1. **Load and transform inside Python**, through proxies or `exec()`.
-2. **Copy only the small result** to PHP: `->to_dict()`, `->tolist()`, `->item()`, or a scalar like `->sum()`.
+2. **Copy only the result** to PHP: `->to_dict()`, `->tolist()`, `->item()`, a scalar like `->sum()`, or a whole table with [`Py::rows($df)`](#copying-tables-into-php).
 3. **Or don't copy at all**: write a file from Python (`->to_csv()`, `->to_parquet()`) and pass the path around.
 
 ```php
@@ -470,6 +504,32 @@ When a chain gets long or needs lambdas, write that part in Python. Both styles 
 $py->vars->orders = $df;                        // hand a proxy to Python
 $result = $py->eval("orders.assign(net=lambda d: d.revenue * 0.84).nlargest(5, 'net')");
 ```
+
+### Copying tables into PHP
+
+`Py::rows()` and `Py::columns()` are the fast, PHP-friendly way to copy a whole DataFrame:
+
+```php
+$rows = Py::rows($df);        // [['id' => 1, 'price' => 9.5, 'when' => '2024-01-02T03:04:05'], ...]
+$cols = Py::columns($df);     // ['id' => [1, 2, ...], 'price' => [9.5, null, ...], ...]
+echo json_encode($rows);      // works: no NAN, no proxies
+```
+
+They differ from `to_dict()` on purpose, to give you data PHP can use directly:
+
+| In the DataFrame | `to_dict()` gives | `Py::rows()` / `Py::columns()` give |
+|---|---|---|
+| `NaN`, `None`, `pd.NA`, `NaT` | `NAN` / `null` / proxies | `null` |
+| datetime (`datetime64`, with or without time zone) | `Timestamp` proxies | ISO 8601 string, e.g. `2024-01-02T03:04:05+02:00` |
+| timedelta | `Timedelta` proxies | ISO 8601 duration, e.g. `P0DT0H1M30S` |
+| categorical | values | values |
+| `±inf` | `INF` / `-INF` | `INF` / `-INF` (still not valid JSON) |
+| the index | included with `orient='index'` etc. | **left out**; call `->reset_index()` first to keep it |
+| `Decimal`, `date`, other objects | proxies, one per cell | `ConversionException` naming the column; convert it first, e.g. `$df['amount'] = $df['amount']->astype('float')` |
+
+* Column names must be strings or integers that stay distinct as PHP array keys (`'1'` and `1` collide in PHP); otherwise you get a `ConversionException`. Rename first, e.g. flatten a MultiIndex.
+* A `Series` isn't accepted: use `$series->tolist()` or `Py::rows($series->to_frame())`.
+* Floats are exact (no rounding), unlike pandas' own `to_json()`.
 
 ### Missing values and dates
 
@@ -563,35 +623,26 @@ Measured with [`benchmarks/overhead.php`](benchmarks/overhead.php). Run it yours
 | `import pandas` (first time in a session) | ~190 ms | ~330 ms |
 | 1,000,000-row `groupby().mean().to_dict()` via 4 proxy calls | ~16 ms | ~16 ms |
 | …the same as one `eval()` | ~9 ms | ~13 ms |
-| Copy 100,000 rows × 2 columns to PHP (`to_dict('records')`) | ~400 ms | ~630 ms |
 | `close()` with pandas loaded | ~72 ms | ~73 ms |
+
+Copying a 100,000-row × 4-column DataFrame into PHP (Linux):
+
+| Method | Time | PHP memory peak | PHP result |
+|---|---|---|---|
+| `$df->to_dict('records')` | ~610 ms | ~60 MB | list of rows, 53 MB |
+| [`Py::rows($df)`](#copying-tables-into-php) | ~240 ms | ~49 MB | list of rows, 41 MB |
+| [`Py::columns($df)`](#copying-tables-into-php) | ~180 ms | ~16 MB | one list per column, 11 MB |
 
 What that means:
 
 * **Per-call overhead is negligible for DataFrame-level work.** Going through 4 proxies instead of one Python expression costs a few milliseconds on a 1M-row groupby.
 * **Per-call overhead dominates chatty code.** 10,000 attribute reads ≈ 1 s. Don't loop over rows from PHP; let pandas/NumPy do it, or write the loop in Python.
-* **Copying is the expensive part, in time and in memory.** Data travels as JSON, and the PHP copy of a table is several times bigger than the DataFrame: 100k rows × 4 columns take about **53 MB** as PHP arrays, with a peak of about 60 MB while decoding. PHP's default `memory_limit` of 128 MB (on Windows `php.ini`) is reached at roughly 200k rows of that shape. Copy summaries, not datasets; for large outputs, write a file from Python (`to_csv`, `to_parquet`).
-* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call. Python itself starts more slowly on Windows (~110 ms on the test machine vs ~13 ms on Linux).
+* **Copying is the expensive part, in time and in memory.** Data travels as JSON, and PHP arrays are much bigger than a DataFrame. Use `Py::rows()`/`Py::columns()` for tables (2.5–3.5× faster than `to_dict('records')`; columns need a quarter of the memory), copy summaries rather than datasets, and for very large outputs write a file from Python (`to_csv`, `to_parquet`). PHP's default `memory_limit` of 128 MB (Windows `php.ini`) holds roughly 250k rows × 4 columns as rows, or over 1M as columns.
+* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call. Python itself starts more slowly on Windows (~120 ms on the test machine vs ~13 ms on Linux).
 
 The per-call figure is in line with other process-based bridges. In-process embedding (swoole/phpy) is far faster per call; see [the comparison](#pyhp-vs-swoolephpy).
 
----|---|
-| Start a session (no imports) | ~37 ms |
-| One round trip (`eval('1')`, attribute read, method call) | ~70–100 µs |
-| `import pandas` (first time in a session) | ~210 ms |
-| `groupby().mean().to_dict()` on 1,000,000 rows via 4 proxy calls | ~17 ms |
-| …the same as one `eval()` | ~10 ms |
-| Copy 100,000 rows to PHP with `to_dict('records')` | ~900 ms |
-| `close()` with pandas loaded | ~70 ms |
-
-What that means:
-
-* **Per-call overhead is negligible for DataFrame-level work.** Calling pandas through 4 proxies instead of one Python expression cost ~7 ms on a 1M-row groupby.
-* **Per-call overhead dominates chatty code.** 10,000 attribute reads ≈ 1 s. Don't loop over rows from PHP; let pandas/NumPy do it, or write the loop in Python.
-* **Copying is the expensive part.** Data goes through JSON. Copy summaries, not datasets. For large outputs, write a file from Python.
-* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call.
-
-The per-call figure is in line with other process-based bridges. In-process embedding (swoole/phpy) is far faster per call; see [the comparison](#pyhp-vs-swoolephpy).
+**Why not Apache Arrow/Parquet for transfers?** Reading Arrow in PHP needs a compiled extension or a slow pure-PHP reader, which would break PyHP's "just `composer require`" promise. Column-wise JSON plus a faster conversion walk gets most of the gain with nothing extra to install. If you need Arrow/Parquet, write the file from Python (`$df->to_parquet($path)`) and read it with your own tools.
 
 ---
 
@@ -642,16 +693,33 @@ Process trees: when a worker is killed (timeout, `close()` after the grace perio
 
 ---
 
-## Imports (provisional)
+## Imports
 
-`$py->import('pandas')` returns a module proxy, and `$py->import('pandas', as: 'pd')` also binds `pd` in the namespace for later `exec()`/`eval()` code. That's deliberately minimal for now. Open questions for the next design round:
+`import()` works like Python's `import` statement: it imports, **binds the name in the session namespace**, and returns what it imported.
 
-* `from x import y` style: `$py->from('os.path')->import('join')`? Or `$py->import('os.path.join')`?
-* Whether imports should register automatically in `vars`.
-* A `modules` namespace (`$py->modules->pandas`) alongside `vars` and `functions`.
-* Caching module proxies per session.
+| PHP | Python | Name bound | Returns |
+|---|---|---|---|
+| `$py->import('pandas')` | `import pandas` | `pandas` | module proxy |
+| `$py->import('pandas', as: 'pd')` | `import pandas as pd` | `pd` | module proxy |
+| `$py->import('os.path')` | `import os.path` | `os` (like Python) | the `os.path` module |
+| `$py->import('os.path', as: 'osp')` | `import os.path as osp` | `osp` | the `os.path` module |
+| `$py->import('time', from: 'datetime')` | `from datetime import time` | `time` | class proxy |
+| `$py->import('time', from: 'datetime', as: 't')` | `from datetime import time as t` | `t` | class proxy |
+| `$py->import('pi', from: 'math')` | `from math import pi` | `pi` | `3.141592653589793` (plain data is copied, as everywhere) |
+| `$py->import('util', from: 'importlib')` | `from importlib import util` | `util` | module proxy (submodules work) |
+| `$py->import('*', from: 'math')` | `from math import *` | every public name (`__all__` if defined) | `null` |
 
-Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` covers every case.
+After importing, everything is reachable from both sides: `$py->modules->pd`, `$py->classes->time`, `$py->vars->pi`, and plain Python code in `exec()`/`eval()`.
+
+Errors are Python's own: `ModuleNotFoundError` for a missing module, `ImportError: cannot import name 'x' from 'y'` for a missing name, both as `PythonException`. An invalid alias, `'*'` without `from`, or `'*'` with `as` throws `ProtocolException` before anything runs.
+
+### Is anything cached?
+
+Yes, by Python itself, and only within a session:
+
+* **The first import of a module in a session runs its code** (e.g. ~200–330 ms for pandas). Python then keeps the module in `sys.modules`, so **importing it again in the same session is almost free** (one round trip, ~0.1 ms) and returns the same module object.
+* **A new session is a new Python process** and pays the first import again. That's why reusing one session for many calls matters.
+* PHP doesn't cache proxies: each `$py->modules->pd` asks Python (~0.1 ms) and gets a fresh proxy to the same module. That keeps PHP in sync if Python code rebinds the name later. If you use a module in a hot loop, keep the proxy in a PHP variable: `$pd = $py->modules->pd;`.
 
 ---
 
@@ -675,7 +743,7 @@ Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` 
 11. Proxy `==`/`===` compares proxies, not Python objects.
 12. Python methods named `offsetGet`, `offsetSet`, `offsetExists`, `offsetUnset`, `getIterator`, or like PHP magic methods need `$o->__call('name', [...])`.
 13. No `with` blocks, `async`/`await`, decorators, or `yield` from PHP: write those parts in Python.
-14. No dedicated `classes` namespace yet; instantiate with `functions->ClassName()`.
+14. `modules` shows what is bound; it never imports implicitly. `import()` without `as` binds the top-level package name, like Python.
 15. `execFile()` doesn't run `if __name__ == "__main__":` blocks and doesn't add the script's folder to `sys.path`.
 
 **Conversion**
@@ -685,7 +753,7 @@ Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` 
 18. Python ints beyond 64 bits, sets, dates, Decimals, `pd.NA`/`NaT` and subclasses of built-ins stay proxies.
 19. PHP objects (`DateTime`, enums, DTOs) and resources can't be sent; convert them first.
 20. Non-UTF-8 PHP strings become `bytes`; Python `bytes` come back as plain strings.
-21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default).
+21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default); `Py::rows()`/`Py::columns()` are the fastest way to copy tables.
 
 **Output and diagnostics**
 
@@ -799,11 +867,11 @@ TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level m
 See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Next up:
 
 1. **Verify on Windows**, then fix whatever it finds.
-2. **Design imports properly** ([open questions](#imports-provisional)).
-3. **`classes` namespace** next to `vars` and `functions`.
-4. **Faster bulk data:** Arrow/Parquet for DataFrames instead of JSON rows.
-5. **PHP callbacks** (`df.apply($phpClosure)`) — needs calls from Python back into PHP during a request.
-6. Packagist release, after choosing a license.
+2. ~~Imports, `modules` and `classes`~~ — done.
+3. ~~Faster bulk data~~ — done (`Py::rows()`, `Py::columns()`, faster conversion).
+4. **PHP callbacks** (`df.apply($phpClosure)`) — see the [feasibility study](studies/php-callbacks.md).
+5. **macOS CI.**
+6. Packagist release, after a code review and choosing a license.
 
 ## License
 
