@@ -27,7 +27,7 @@ use PyHP\Exception\WorkerStartException;
  */
 final class Worker
 {
-    public const PROTOCOL_VERSION = 1;
+    public const PROTOCOL_VERSION = 2;
 
     private const POLL_SECONDS = 0.05;
 
@@ -114,38 +114,55 @@ final class Worker
     }
 
     /**
-     * Send one request and wait for its response, within one shared deadline.
+     * Send one frame. The deadline is shared by everything belonging to one call;
+     * $timeout is only used in the error message.
      */
-    public function roundTrip(string $request, ?float $timeout): string
+    public function send(string $message, ?float $deadline, ?float $timeout): void
     {
-        $size = strlen($request);
+        $size = strlen($message);
         if ($size > $this->maxMessageBytes) {
             throw new MessageTooLargeException(
-                "The request is {$size} bytes, above the {$this->maxMessageBytes}-byte max_message_bytes limit."
+                "The message is {$size} bytes, above the {$this->maxMessageBytes}-byte max_message_bytes limit."
             );
         }
-        $deadline = $timeout === null ? null : microtime(true) + $timeout;
 
         try {
-            $this->write(pack('N', $size).$request, $deadline);
+            $this->write(pack('N', $size).$message, $deadline);
+        } catch (TimeoutException $error) {
+            throw $this->timedOut($timeout, $error);
+        }
+    }
+
+    /**
+     * Wait for the next frame from the worker (a response or a callback call).
+     */
+    public function receive(?float $deadline, ?float $timeout): string
+    {
+        try {
             $header = $this->read(4, $deadline);
             $length = unpack('Nlength', $header);
             $length = is_array($length) && is_int($length['length']) ? $length['length'] : -1;
             if ($length < 0 || $length > $this->maxMessageBytes) {
-                throw new ProtocolException("The worker announced an invalid response size ({$length} bytes).");
+                throw new ProtocolException("The worker announced an invalid message size ({$length} bytes).");
             }
 
             return $this->read($length, $deadline);
         } catch (TimeoutException $error) {
-            $this->kill();
-            throw new TimeoutException(sprintf(
-                'The Python call did not finish within the %s-second timeout. The worker was stopped and the session is closed.',
-                (string) $timeout,
-            ), 0, $error);
+            throw $this->timedOut($timeout, $error);
         } catch (ProtocolException $error) {
             $this->kill();
             throw $error;
         }
+    }
+
+    private function timedOut(?float $timeout, TimeoutException $error): TimeoutException
+    {
+        $this->kill();
+
+        return new TimeoutException(sprintf(
+            'The Python call did not finish within the %s-second timeout. The worker was stopped and the session is closed.',
+            (string) $timeout,
+        ), 0, $error);
     }
 
     /** Polite stop: closing the socket makes the worker exit on its own. */
