@@ -11,6 +11,12 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ### Added
 - `ROADMAP.md`: the plan for v0.3.0, v0.4.0 and the goals for v1.0.0.
 
+### Changed
+- Composer downloads of PyHP contain only what applications need (`src/`, `bin/`, `python/`, `composer.json`, README, CHANGELOG, LICENSE); tests, examples, docs, benchmarks and tool configs stay in the repository (`export-ignore` in `.gitattributes`).
+
+### Removed
+- `studies/` and `docs/PROJECT_CONTEXT.md`: design notes used while deciding features; the decisions are reflected in the docs, the CHANGELOG and `ROADMAP.md`.
+
 ## [0.2.0] - 2026-11-07
 
 ### Added
