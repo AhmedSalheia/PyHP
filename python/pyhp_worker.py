@@ -40,6 +40,8 @@ PROTOCOL_VERSION: Final = 1
 INT64_MIN: Final = -(2**63)
 INT64_MAX: Final = 2**63 - 1
 MAX_DEPTH: Final = 256
+# Encoding uses up to 4 frames per nesting level, plus room for the caller's stack.
+RECURSION_LIMIT: Final = MAX_DEPTH * 4 + 1000
 DEFAULT_MAX_FRAME: Final = 64 * 1024 * 1024
 NAMESPACE_MODULE: Final = "__pyhp__"
 HEADER: Final = struct.Struct(">I")
@@ -193,9 +195,20 @@ def encode(value: object, registry: Registry, *, strict: bool = False) -> Json:
 
 def encode_value(value: object, registry: Registry, *, strict: bool = False) -> tuple[Json, bool]:
     """Like ``encode``, also saying whether the result contains any tagged value."""
+    _ensure_recursion_room()
     state = _EncodeState(registry, strict)
     result = _encode(value, state, 0)
     return result, state.tagged
+
+
+def _ensure_recursion_room() -> None:
+    """Make room for MAX_DEPTH levels of nesting (a few frames each).
+
+    Python 3.10 and 3.11 allow only 1000 frames by default, which a value
+    nested close to MAX_DEPTH would exceed.
+    """
+    if sys.getrecursionlimit() < RECURSION_LIMIT:
+        sys.setrecursionlimit(RECURSION_LIMIT)
 
 
 def _ref(value: object, registry: Registry) -> Json:
