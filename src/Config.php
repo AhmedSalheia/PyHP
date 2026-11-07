@@ -6,6 +6,8 @@ namespace PyHP;
 
 use Composer\InstalledVersions;
 use PyHP\Exception\ConfigException;
+use PyHP\Setup\PythonLocation;
+use PyHP\Setup\PythonSource;
 use PyHP\Setup\SetupConfig;
 use PyHP\Setup\VirtualEnv;
 
@@ -96,20 +98,29 @@ final readonly class Config
      */
     public static function detectPython(?string $projectRoot = null): string
     {
+        return self::locatePython($projectRoot)->python;
+    }
+
+    /**
+     * Like detectPython(), but also says which rule picked the interpreter and
+     * where the project's venv is expected (null when there's no Composer project).
+     *
+     * @param  string|null  $projectRoot  null means the root of the Composer project PyHP is installed in
+     */
+    public static function locatePython(?string $projectRoot = null): PythonLocation
+    {
+        $root = $projectRoot ?? self::projectRoot();
+        $venv = $root === null ? null : SetupConfig::fromProject($root)->venvPath($root);
+
         $fromEnv = getenv('PYHP_PYTHON');
         if (is_string($fromEnv) && $fromEnv !== '') {
-            return $fromEnv;
+            return new PythonLocation($fromEnv, PythonSource::EnvironmentVariable, $venv);
+        }
+        if ($venv !== null && is_file(VirtualEnv::python($venv))) {
+            return new PythonLocation(VirtualEnv::python($venv), PythonSource::ProjectVenv, $venv);
         }
 
-        $root = $projectRoot ?? self::projectRoot();
-        if ($root !== null) {
-            $venvPython = VirtualEnv::python(SetupConfig::fromProject($root)->venvPath($root));
-            if (is_file($venvPython)) {
-                return $venvPython;
-            }
-        }
-
-        return self::defaultPython();
+        return new PythonLocation(self::defaultPython(), PythonSource::PlatformDefault, $venv);
     }
 
     private static function projectRoot(): ?string

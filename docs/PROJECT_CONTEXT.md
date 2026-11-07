@@ -73,6 +73,7 @@ Why a socket instead of pipes: PHP on Windows can't `stream_select()` on pipes, 
 | D24 | Everything PyHP lives under one name: Packagist vendor `pyhp`, GitHub organization `pyhp-php` (`pyhp` was taken), repository `pyhp-php/pyhp`. `ahmedsalheia/pyhp` is abandoned on Packagist in favour of `pyhp/pyhp`. Future packages go under the same vendor (e.g. `pyhp/laravel`). |
 | D25 | Documentation lives in numbered `docs/NN-topic.md` files, read in order; the README is a short overview (examples, install, contributing, about the project and the author, donations placeholder). |
 | D26 | Every change gets a CHANGELOG line under **[@dev]** when it's made; releases move them under the version. |
+| D27 | `vendor/bin/pyhp info` is the first debugging step: PHP, project settings, chosen interpreter and why, packages, uv, a live worker test, problems with fixes; exit code 1 on problems so CI can use it. |
 
 ## 6. Implemented (as of 2026-11-07)
 
@@ -115,7 +116,7 @@ Also done: 0.1.1 as `pyhp/pyhp` from `pyhp-php/pyhp` (D24); `vendor/bin/pyhp set
 
 Next:
 
-1. **0.2.0:** `vendor/bin/pyhp info`, then release; switch the sample project to `pyhp setup` as the final check.
+1. **0.2.0:** release (`pyhp info` is done); switch the sample project to `pyhp setup` as the final check.
 2. **Must come back to:** Python requirements declared by *other* Composer packages. Libraries built on PyHP (e.g. a future `pyhp/laravel`, or any package that uses spaCy) should declare their own `extra.pyhp.requirements`, and `pyhp setup` should collect them from every installed package (`vendor/composer/installed.json`), merge them with the root project's, and report conflicts. Needs decisions on conflicting versions and on whether the root project can override or exclude them.
 3. Lossless conversion of integer-like numbers (SymPy `Integer`) to PHP int (maybe 0.3.0).
 4. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches, a thread-safe callback mode, a docs website.
