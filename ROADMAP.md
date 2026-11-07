@@ -7,7 +7,7 @@ Goal: make Python's libraries (data analysis, science, NLP, machine learning, an
 | 1 | Foundation | v0.1.0 | released 2026-11-07 | Worker, sessions, proxies, `vars`/`functions`/`classes`/`modules`, Python-style imports, PHP callbacks, fast table export, CI on three systems, MIT license. |
 | 2 | New home | v0.1.1 | released 2026-11-07 | Package renamed to `pyhp/pyhp`, repository moved to `pyhp-php/pyhp`. |
 | 3 | Tooling | v0.2.0 | released 2026-11-07 | `pyhp setup` (uv or venv/pip), `pyhp info`, automatic `.venv` detection, `Py::ref()`, examples 06–11, numbered docs. |
-| 4 | Ecosystem and data fidelity | v0.3.0 | planned | Python requirements declared by any Composer package, exact environments, lossless numbers, real-world setup tests. |
+| 4 | Ecosystem and data fidelity | v0.3.0 | in progress | Python requirements declared by any Composer package, exact environments, lossless numbers, real-world setup tests. |
 | 5 | Long-running PHP and frameworks | v0.4.0 | planned | Worker reuse and recovery for queue workers and app servers, live output, faster callbacks, a Laravel package. |
 | 6 | Stable | v1.0.0 | goal | Frozen public API and protocol, documented guarantees, docs website, proven in production. |
 
@@ -16,7 +16,7 @@ Goal: make Python's libraries (data analysis, science, NLP, machine learning, an
 PyHP becomes something other packages can build on, and values cross the bridge with fewer surprises.
 
 1. **Python requirements from every Composer package.** A package built on PyHP (a Laravel integration, a package that wraps spaCy, ...) declares its own `extra.pyhp.requirements`. `pyhp setup` collects them from all installed packages (`vendor/composer/installed.json`), merges them with the root project's, and installs everything into one environment.
-   - The root project decides: it can pin a different version or exclude a package (for example `extra.pyhp.exclude`).
+   - The root project decides: its own requirements are always added (so it can tighten versions), `extra.pyhp.ignore-packages` skips a Composer package's Python requirements, and `extra.pyhp.overrides` replaces a version rule outright (uv only; pip has no overrides).
    - Conflicting requirements (two packages asking for incompatible versions) are reported clearly, naming the packages, instead of failing inside pip.
    - `pyhp info` shows which package asked for each requirement.
 2. **Exact environments.** `pyhp setup --exact` makes the venv match the requirements exactly, removing packages that are no longer listed (`uv pip sync` with uv). An optional lock file (`pyhp.lock`) records exact versions so every machine and CI run gets the same environment.

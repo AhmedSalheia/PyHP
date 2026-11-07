@@ -22,3 +22,4 @@
 /pyproject.toml export-ignore
 /requirements-dev.txt export-ignore
 /ROADMAP.md export-ignore
+/TASKS.md export-ignore

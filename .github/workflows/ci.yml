@@ -53,3 +53,30 @@ jobs:
       - run: vendor/bin/pest --coverage --min=80
         env:
           PYHP_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
+
+  setup-smoke:
+    name: pyhp setup (${{ matrix.os }}, ${{ matrix.installer }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        installer: [uv, pip]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+      - if: matrix.installer == 'uv'
+        uses: astral-sh/setup-uv@v10.0.1
+      - if: matrix.installer == 'pip'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - if: matrix.installer == 'uv'
+        run: php tests/smoke/setup-smoke.php
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+      - if: matrix.installer == 'pip'
+        run: php tests/smoke/setup-smoke.php --no-uv
