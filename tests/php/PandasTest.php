@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use PyHP\Exception\ConversionException;
+use PyHP\Exception\PythonException;
 use PyHP\Py;
 use PyHP\PyObject;
 
@@ -109,12 +111,12 @@ test('Py::rows refuses cells PHP cannot hold and names the column', function ():
     $this->py->exec("import pandas as pd\nfrom decimal import Decimal\ndf = pd.DataFrame({'amount': [Decimal('1.10')]})");
 
     expect(fn () => Py::rows($this->py->vars->df))
-        ->toThrow(PyHP\Exception\ConversionException::class, "column 'amount' holds decimal.Decimal values");
+        ->toThrow(ConversionException::class, "column 'amount' holds decimal.Decimal values");
 })->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
 
 test('Py::rows needs a DataFrame', function (): void {
     expect(fn () => Py::rows($this->py->eval('{1, 2}')))
-        ->toThrow(PyHP\Exception\PythonException::class, 'a pandas DataFrame is needed, not a set');
+        ->toThrow(PythonException::class, 'a pandas DataFrame is needed, not a set');
 })->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
 
 test('Py::rows is much faster than to_dict records for big frames', function (): void {

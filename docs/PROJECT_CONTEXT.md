@@ -49,6 +49,19 @@ Why a socket instead of pipes: PHP on Windows can't `stream_select()` on pipes, 
 | D5 | No in-process embedding / native extension / FFI milestone. phpy covers that. | 2026-11-07 |
 | D6 | `Py::exec()` no longer means "fresh process per call"; it runs in the shared default session. One-shot processes are not a feature for now. | 2026-11-07 (MVP) |
 
+### Decisions of 2026-11-07 (after the MVP)
+
+| # | Decision |
+|---|---|
+| D7 | `import()` mirrors Python's import statement: `as:`, `from:`, star imports, submodules; the imported name is always bound in the session. It returns what was imported (proxy or plain value). |
+| D8 | `$py->modules` is a view of the modules bound in the session (from `import()` or `exec()`), with `names()`/`isset()`. It never imports implicitly. Python itself caches modules per session (`sys.modules`); PHP doesn't cache proxies. |
+| D9 | `$py->classes` creates instances and refuses non-classes; `functions` keeps accepting any callable. |
+| D10 | No Gitea. The repo lives on GitHub (Ahmed's account), with CI on GitHub Actions. Ahmed's general GitFlow skill still mentions Gitea; for PyHP, GitHub is the only remote. |
+| D11 | Faster bulk data only where it adds nothing for users to install: no Arrow (needs a PHP extension). Done: faster conversion walk plus `Py::rows()`/`Py::columns()`. |
+| D12 | PHP callbacks: feasibility study first (`studies/php-callbacks.md`); build only after Ahmed answers its open questions. |
+| D13 | First release (0.1.0) postponed until Ahmed has reviewed the code. |
+| D14 | macOS: test through GitHub Actions `macos-latest` runners (Ahmed has no Mac). |
+
 ## 6. MVP — implemented (2026-11-07)
 
 **Public API**
@@ -87,13 +100,15 @@ No Python operators on proxies (use `gt`, `mul`, `__and__`, or `eval`). No PHP c
 
 ## 9. Roadmap
 
-1. ~~Verify on Windows~~ Done 2026-11-07 (see §7). Still to do: measure Windows start-up and round-trip times without Xdebug; push to GitHub with the CI workflow.
-2. **Imports design session** (D4): `from x import y`, a `modules` namespace, caching.
-3. **`classes` namespace** (D3).
-4. **Bulk data path:** Arrow/Parquet for DataFrames instead of JSON rows; benchmark first.
-5. **PHP callbacks** (`df.apply($closure)`): requires re-entrant requests from Python to PHP.
-6. **Release prep:** license, Packagist name check, CHANGELOG, tag 0.1.0.
-7. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers.
+Done on 2026-11-07: Windows validation and fixes (start-up 650 → 175 ms, memory), imports (D7), `modules` (D8), `classes` (D9), faster bulk data (D11), callbacks study (D12). Branches, in merge order: `fix/windows-startup-and-memory` → `feature/imports-modules-classes` → `feature/fast-table-export` → `chore/php-callbacks-study`.
+
+Next:
+
+1. **Ahmed reviews the code** (D13) and merges the branches into `develop` through pull requests.
+2. **Answer the callbacks study's open questions**, then build it in the study's phases (about 6–8 working days).
+3. **macOS in CI** (D14): add `macos-latest` to the matrix.
+4. **Release prep:** license, Packagist name check, CHANGELOG, tag 0.1.0.
+5. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches.
 
 ## 10. How Claude should work with me
 

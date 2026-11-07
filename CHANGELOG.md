@@ -20,6 +20,8 @@ All notable changes to PyHP are documented here. The format follows
 - `$py->classes`: create instances of Python classes (`$py->classes->Invoice(...)`), get class proxies, `names()`; refuses non-classes.
 - `Py::rows($df)` and `Py::columns($df)`: copy a pandas DataFrame column by column, 2.5–3.5× faster than `to_dict('records')`, with missing values as `null` and dates as ISO strings (100k rows × 4 columns: ~240 ms / ~180 ms instead of ~610 ms; columns peak at 16 MB instead of 60 MB).
 
+- `studies/php-callbacks.md`: feasibility study and integration plan for calling PHP closures from Python.
+
 ### Changed
 - Faster conversion of Python results: plain scalars skip per-value work and dict key sets are validated once per shape (records ~25% faster, flat lists ~4× faster), with identical output.
 - Python dicts now travel to PHP as plain JSON objects, and each response says whether it contains any tagged value. Plain results skip PHP's decode pass: copying 100k rows × 4 columns dropped from a 207 MB to a 60 MB memory peak, and from ~1.6 s to ~0.65 s (Linux).
