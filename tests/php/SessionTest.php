@@ -177,3 +177,26 @@ test('env, cwd and extra paths reach the worker', function (): void {
     $py->close();
     removeDirectory($dir);
 });
+
+test('a failed start leaves no temporary log file behind', function (): void {
+    $pattern = sys_get_temp_dir().DIRECTORY_SEPARATOR.(PHP_OS_FAMILY === 'Windows' ? 'pyh*.tmp' : 'pyhp-*');
+    $before = glob($pattern) ?: [];
+
+    try {
+        testSession(['python' => 'pyhp-no-such-python-binary']);
+    } catch (WorkerStartException) {
+    }
+
+    expect(glob($pattern) ?: [])->toBe($before);
+});
+
+test('starting a session pays no fixed delay', function (): void {
+    // PHP on Windows waits 500 ms whenever it closes a listening socket. PyHP must
+    // never own one, so a session should start in roughly Python's own start-up time.
+    $start = hrtime(true);
+    $py = testSession();
+    $elapsedMs = (hrtime(true) - $start) / 1e6;
+    $py->close();
+
+    expect($elapsedMs)->toBeLessThan(450.0);
+});

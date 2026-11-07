@@ -15,6 +15,7 @@ from pyhp_worker import (
     StaleReferenceError,
     decode,
     encode,
+    encode_value,
 )
 
 
@@ -59,7 +60,20 @@ def test_lists_and_tuples_become_arrays(registry: Registry) -> None:
 
 
 def test_dicts_are_sent_as_key_value_pairs(registry: Registry) -> None:
-    assert encode({"a": 1, 2: "b"}, registry) == {"$t": "dict", "v": [["a", 1], [2, "b"]]}
+    # Plain JSON objects: PHP's json_decode turns them straight into arrays.
+    assert encode({"a": 1, 2: "b"}, registry) == {"a": 1, "2": "b"}
+
+
+def test_dict_with_a_tag_key_is_wrapped_so_it_is_not_mistaken_for_a_tag(registry: Registry) -> None:
+    assert encode({"$t": "x", "a": 1}, registry) == {"$t": "dict", "o": {"$t": "x", "a": 1}}
+
+
+def test_encode_value_reports_whether_any_tag_was_needed(registry: Registry) -> None:
+    assert encode_value({"a": [1, 2.5, "x", None]}, registry) == ({"a": [1, 2.5, "x", None]}, False)
+    assert encode_value([b"x"], registry)[1] is True
+    assert encode_value({"n": math.nan}, registry)[1] is True
+    assert encode_value([Opaque()], registry)[1] is True
+    assert encode_value({"$t": 1}, registry)[1] is True
 
 
 def test_dict_with_unsupported_keys_stays_in_python(registry: Registry) -> None:
@@ -95,13 +109,10 @@ def test_unknown_objects_become_references_with_type_name(registry: Registry) ->
 def test_nested_unconvertible_values_become_nested_references(registry: Registry) -> None:
     result = encode({"plain": 1, "obj": Opaque()}, registry)
     assert isinstance(result, dict)
-    pairs = result["v"]
-    assert isinstance(pairs, list)
-    assert pairs[0] == ["plain", 1]
-    nested = pairs[1]
-    assert isinstance(nested, list)
-    assert isinstance(nested[1], dict)
-    assert nested[1]["$t"] == "ref"
+    assert result["plain"] == 1
+    nested = result["obj"]
+    assert isinstance(nested, dict)
+    assert nested["$t"] == "ref"
 
 
 def test_subclasses_of_builtins_stay_in_python_in_auto_mode(registry: Registry) -> None:
@@ -133,7 +144,7 @@ def test_strings_that_are_not_valid_utf8_stay_in_python(registry: Registry) -> N
 
 
 def test_strict_mode_converts_subclasses_and_sets(registry: Registry) -> None:
-    assert encode(OrderedDict(a=1), registry, strict=True) == {"$t": "dict", "v": [["a", 1]]}
+    assert encode(OrderedDict(a=1), registry, strict=True) == {"a": 1}
     assert encode(frozenset([7]), registry, strict=True) == [7]
 
 
@@ -245,3 +256,11 @@ def test_decode_rejects_malformed_tagged_values() -> None:
         decode({"$t": "float", "v": "huge"}, registry)
     with pytest.raises(ConversionError):
         decode(object(), registry)
+
+
+def test_dict_that_must_stay_in_python_does_not_leak_value_references() -> None:
+    registry = Registry()
+    result = encode({1: Opaque(), "1": "b"}, registry)
+    assert isinstance(result, dict)
+    assert result["$t"] == "ref"
+    assert len(registry) == 1  # only the dict itself

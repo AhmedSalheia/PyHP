@@ -11,7 +11,6 @@ use PyHP\Exception\PythonException;
 use PyHP\Exception\SessionClosedException;
 use PyHP\Internal\Codec;
 use PyHP\Internal\Worker;
-use stdClass;
 
 /**
  * One live Python process with its own global namespace.
@@ -180,13 +179,17 @@ final class Session
             }
         }
 
-        $this->handleOutput($response->out ?? '');
+        $this->handleOutput($response['out'] ?? '');
 
-        if (($response->ok ?? false) !== true) {
-            throw $this->errorFrom($response->error ?? null);
+        if (($response['ok'] ?? false) !== true) {
+            throw $this->errorFrom($response['error'] ?? null);
         }
 
-        return $this->codec->decode($response->value ?? null);
+        $value = $response['value'] ?? null;
+
+        // Plain results (no references, bytes or NaN/Inf anywhere) are already
+        // the final PHP value: skip the decode pass and its full copy.
+        return ($response['tagged'] ?? true) === false ? $value : $this->codec->decode($value);
     }
 
     /**
@@ -233,13 +236,13 @@ final class Session
 
     private function errorFrom(mixed $error): \Throwable
     {
-        if (! $error instanceof stdClass) {
+        if (! is_array($error)) {
             return new ProtocolException('The worker reported a failure without details.');
         }
-        $kind = $error->kind ?? null;
-        $type = is_string($error->type ?? null) ? $error->type : 'Exception';
-        $message = is_string($error->message ?? null) ? $error->message : '';
-        $traceback = is_string($error->traceback ?? null) ? $error->traceback : '';
+        $kind = $error['kind'] ?? null;
+        $type = is_string($error['type'] ?? null) ? $error['type'] : 'Exception';
+        $message = is_string($error['message'] ?? null) ? $error['message'] : '';
+        $traceback = is_string($error['traceback'] ?? null) ? $error['traceback'] : '';
 
         return match ($kind) {
             'python' => new PythonException($type, $message, $traceback),

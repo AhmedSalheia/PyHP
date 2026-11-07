@@ -8,6 +8,7 @@ import socket
 import struct
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,12 +45,25 @@ class Connection:
         return chunks
 
 
-def start_worker(tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000) -> Connection:
-    server = socket.create_server(("127.0.0.1", 0))
-    server.settimeout(10)
-    port = server.getsockname()[1]
+def frame(message: dict[str, object]) -> bytes:
+    body = json.dumps(message).encode()
+    return HEADER.pack(len(body)) + body
+
+
+def launch(
+    tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000, startup_timeout: float = 10
+) -> tuple[subprocess.Popen[bytes], int, Path]:
+    """Start the worker; return the process, the port it listens on, and its log."""
+    port_file = tmp_path / "port"
+    port_file.write_text("")
     log = tmp_path / "worker.log"
-    env = dict(os.environ, PYHP_PORT=str(port), PYHP_TOKEN=token, PYHP_MAX_FRAME=str(max_frame))
+    env = dict(
+        os.environ,
+        PYHP_PORT_FILE=str(port_file),
+        PYHP_TOKEN=token,
+        PYHP_MAX_FRAME=str(max_frame),
+        PYHP_STARTUP_TIMEOUT=str(startup_timeout),
+    )
     with log.open("wb") as log_file:
         process = subprocess.Popen(  # noqa: S603  # fixed argv, no shell
             [sys.executable, "-u", str(WORKER)],
@@ -58,9 +72,18 @@ def start_worker(tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000)
             stderr=log_file,
             env=env,
         )
-    sock, _ = server.accept()
-    server.close()
-    sock.settimeout(10)
+    deadline = time.monotonic() + 10
+    while not port_file.read_text().endswith("\n"):
+        assert process.poll() is None, log.read_text()
+        assert time.monotonic() < deadline, "worker never published its port"
+        time.sleep(0.005)
+    return process, int(port_file.read_text()), log
+
+
+def start_worker(tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000) -> Connection:
+    process, port, log = launch(tmp_path, token, max_frame)
+    sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+    sock.sendall(frame({"op": "auth", "token": token}))
     return Connection(sock, process, log)
 
 
@@ -108,12 +131,15 @@ def test_user_output_never_reaches_the_protocol_channel(worker: Connection) -> N
     assert "err" in log_text
 
 
-def test_secret_environment_is_removed_from_user_code(worker: Connection) -> None:
+def test_worker_control_variables_are_removed_from_user_code(worker: Connection) -> None:
+    # The user's own environment (even variables starting with PYHP_) passes through;
+    # only the worker's control variables, including the secret token, are removed.
     worker.receive()
-    worker.send(
-        {"op": "eval", "expr": "[k for k in __import__('os').environ if k.startswith('PYHP_')]"}
-    )
+    names = ["PYHP_PORT", "PYHP_TOKEN", "PYHP_MAX_FRAME", "PYHP_PATHS"]
+    worker.send({"op": "eval", "expr": f"[k for k in {names!r} if k in __import__('os').environ]"})
     assert worker.receive()["value"] == []
+    worker.send({"op": "eval", "expr": f"{TOKEN!r} in __import__('os').environ.values()"})
+    assert worker.receive()["value"] is False
 
 
 def test_input_reads_nothing(worker: Connection) -> None:
@@ -177,3 +203,24 @@ def test_extra_paths_are_added_to_sys_path(tmp_path: Path, monkeypatch: pytest.M
     assert connection.receive()["value"] == 7
     connection.sock.close()
     connection.process.wait(timeout=10)
+
+
+def test_connections_without_the_token_are_dropped(tmp_path: Path) -> None:
+    process, port, log = launch(tmp_path)
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as rogue:
+        rogue.sendall(frame({"op": "auth", "token": "wrong"}))
+        assert rogue.recv(1) == b""  # closed without a word
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as garbage:
+        garbage.sendall(HEADER.pack(10_000_000))
+        assert garbage.recv(1) == b""
+    connection = Connection(socket.create_connection(("127.0.0.1", port), timeout=10), process, log)
+    connection.sock.sendall(frame({"op": "auth", "token": TOKEN}))
+    assert connection.receive()["op"] == "hello"
+    connection.sock.close()
+    assert process.wait(timeout=10) == 0
+
+
+def test_worker_gives_up_when_nobody_connects(tmp_path: Path) -> None:
+    process, _, log = launch(tmp_path, startup_timeout=0.5)
+    assert process.wait(timeout=10) == 3
+    assert "did not connect" in log.read_text()
