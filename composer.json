@@ -2,7 +2,7 @@
     "name": "ahmedsalheia/pyhp",
     "description": "Use Python libraries (pandas, NumPy, ...) from PHP through a persistent Python worker and object proxies.",
     "type": "library",
-    "license": "proprietary",
+    "license": "MIT",
     "keywords": [
         "python",
         "pandas",
