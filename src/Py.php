@@ -169,6 +169,24 @@ final class Py
     }
 
     /**
+     * A live proxy to an attribute, even when its value is plain data that reading
+     * `$object->attribute` would copy into PHP (dicts, lists, numbers, ...).
+     * Use it to change such an attribute in place:
+     *
+     *     Py::ref($doc, 'user_data')['checked_by'] = 'PHP';
+     */
+    public static function ref(PyObject $object, string $attribute): PyObject
+    {
+        [$session, $id] = Codec::unwrap($object);
+        $proxy = $session->request('getattr_ref', ['ref' => $id, 'name' => $attribute]);
+        if (! $proxy instanceof PyObject) {
+            throw new ProtocolException('getattr_ref returned a value instead of a proxy.');
+        }
+
+        return $proxy;
+    }
+
+    /**
      * Copy the Python object into a PHP value, also accepting sets and subclasses
      * of dict/list/str/int/float. Throws ConversionException if any part has no
      * PHP equivalent, instead of returning nested proxies.
