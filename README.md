@@ -942,6 +942,19 @@ python -m mypy
 python -m pytest --cov
 ```
 
+### Git hooks
+
+Activate the hooks once per clone:
+
+```bat
+git config core.hooksPath .githooks
+```
+
+* **`pre-commit`** formats, lints and type-checks what you commit: staged PHP files are formatted with Pint (and re-staged) and checked with PHPStan; staged Python files are formatted with `ruff format` (re-staged) and checked with `ruff check` and `mypy`. Commits without PHP or Python files skip all of it. It refuses files that are only partly staged, because re-staging them after formatting would also commit the parts you left out. Python tools come from `.venv` when it exists (`python -m pip install ruff mypy` there).
+* **`pre-push`** blocks direct pushes to `main` and `develop`; use pull requests.
+
+Tests aren't run on commit (the PHP suite takes about 40 s); `composer check`, pytest and CI run them.
+
 ### Continuous integration
 
 `.github/workflows/ci.yml` runs every check on GitHub Actions for each push and pull request: the Python worker on Python 3.10 and 3.13, and the PHP suite on PHP 8.2 and 8.4 with pandas installed, on Linux and Windows.
