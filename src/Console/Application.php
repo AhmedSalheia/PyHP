@@ -18,6 +18,7 @@ final class Application
 
         Usage:
           pyhp setup [options]   Create the project's Python environment and install its packages
+          pyhp info              Show PHP, Python, venv and package details for debugging
           pyhp help              Show this help
 
         Run it from your project's root folder (where composer.json is).
@@ -40,12 +41,14 @@ final class Application
     /**
      * @param  Closure(string): void  $out
      * @param  Closure(string): void  $err
+     * @param  (Closure(string): ?string)|null  $workerCheck  for `info`; null starts a real worker
      */
     public function __construct(
         private readonly CommandRunner $runner,
         private readonly Closure $out,
         private readonly Closure $err,
         private readonly string $osFamily = PHP_OS_FAMILY,
+        private readonly ?Closure $workerCheck = null,
     ) {}
 
     /**
@@ -59,6 +62,13 @@ final class Application
             ($this->out)(self::USAGE);
 
             return 0;
+        }
+        if ($command === 'info') {
+            try {
+                return (new InfoCommand($this->runner, $this->out, $this->workerCheck))->run($cwd);
+            } catch (ConfigException $e) {
+                return $this->fail($e->getMessage());
+            }
         }
         if ($command !== 'setup') {
             return $this->fail(sprintf('Unknown command "%s". Run "pyhp help" to see the commands.', $command));

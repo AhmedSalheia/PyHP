@@ -34,6 +34,7 @@ and let PyHP build the Python environment (with [uv](https://docs.astral.sh/uv/)
 
 ```bat
 vendor/bin/pyhp setup
+vendor/bin/pyhp info      # check that everything is in place
 ```
 
 PyHP finds that environment by itself. Requirements: PHP 8.2+ (64-bit) and Python 3.10+. See [Installation](docs/02-installation.md) for every option.

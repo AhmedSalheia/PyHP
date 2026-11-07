@@ -14,6 +14,8 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - `Config::detectPython()`: PyHP now finds the interpreter by itself when the `python` option isn't set: the `PYHP_PYTHON` environment variable, then the Composer project's `.venv` (or `extra.pyhp.venv`), then `python`/`python3`.
 - Examples `08_standard_library.php` (difflib, statistics, itertools, fractions/decimal, Counter, ipaddress), `09_matplotlib_charts.php`, `10_pillow_images.php` and `11_scikit_learn.php`, with optional test suites that skip when the library isn't installed; README section "More libraries in practice".
 - `requirements-dev.txt`, referenced from PyHP's own `extra.pyhp`: `php bin/pyhp setup` in a clone installs everything the examples, optional tests and Python checks need.
+- `vendor/bin/pyhp info`: shows PyHP and PHP details (version, binary, OS, php.ini, whether `proc_open()` is allowed), the project's Python settings, the interpreter PyHP will use and why, its version, the venv, uv, every required package with its installed version, and a live worker test; lists problems with the command that fixes them and exits 1 when there are any.
+- `Config::locatePython()` and `PythonSource`: the interpreter PyHP would pick, the reason, and the project's venv folder.
 
 ### Changed
 - The examples and the test suite use the interpreter PyHP detects (the repository's `.venv` after `php bin/pyhp setup`) instead of requiring `PYHP_PYTHON` / `PYHP_TEST_PYTHON`; both variables still work.

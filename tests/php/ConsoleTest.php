@@ -96,3 +96,12 @@ test('the bin/pyhp script runs the application', function (): void {
     expect($code)->toBe(0)
         ->and(implode("\n", $output))->toContain('pyhp setup');
 });
+
+test('info reports a broken composer.json on stderr', function (): void {
+    file_put_contents($this->root.'/composer.json', '{');
+
+    $code = ($this->app)(new FakeCommandRunner)->run(['info'], $this->root);
+
+    expect($code)->toBe(1)
+        ->and(implode('', $this->errors->getArrayCopy()))->toContain('composer.json');
+});

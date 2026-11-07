@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PyHP\Config;
 use PyHP\Exception\ConfigException;
 use PyHP\OutputMode;
+use PyHP\Setup\PythonSource;
 use PyHP\Setup\VirtualEnv;
 
 test('defaults are sensible', function (): void {
@@ -116,6 +117,34 @@ test('detectPython follows the venv folder set in composer.json', function (): v
 
     try {
         expect(Config::detectPython($root))->toBe($venvPython);
+    } finally {
+        putenv($previous === false ? 'PYHP_PYTHON' : 'PYHP_PYTHON='.$previous);
+        removeDirectory($root);
+    }
+});
+
+test('locatePython says why it picked the interpreter', function (): void {
+    $root = sys_get_temp_dir().DIRECTORY_SEPARATOR.'pyhp-locate-'.bin2hex(random_bytes(4));
+    mkdir($root);
+    $previous = getenv('PYHP_PYTHON');
+    putenv('PYHP_PYTHON');
+
+    try {
+        $default = Config::locatePython($root);
+        expect($default->python)->toBe(Config::defaultPython())
+            ->and($default->source)->toBe(PythonSource::PlatformDefault)
+            ->and($default->venv)->toBe($root.DIRECTORY_SEPARATOR.'.venv');
+
+        $venvPython = VirtualEnv::python($root.DIRECTORY_SEPARATOR.'.venv');
+        mkdir(dirname($venvPython), 0777, true);
+        touch($venvPython);
+        expect(Config::locatePython($root)->source)->toBe(PythonSource::ProjectVenv);
+
+        putenv('PYHP_PYTHON=/custom/python');
+        $fromEnv = Config::locatePython($root);
+        expect($fromEnv->python)->toBe('/custom/python')
+            ->and($fromEnv->source)->toBe(PythonSource::EnvironmentVariable)
+            ->and($fromEnv->source->describe())->toContain('PYHP_PYTHON');
     } finally {
         putenv($previous === false ? 'PYHP_PYTHON' : 'PYHP_PYTHON='.$previous);
         removeDirectory($root);

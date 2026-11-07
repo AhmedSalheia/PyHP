@@ -5,6 +5,7 @@ PyHP installs a small command line tool as `vendor/bin/pyhp` (`vendor\bin\pyhp` 
 | Command | What it does |
 |---|---|
 | `pyhp setup` | Creates the project's Python virtual environment and installs its packages. |
+| `pyhp info` | Shows PHP, Python, venv, package and worker details, and what to fix. |
 | `pyhp help` | Lists the commands and options. |
 
 ## `vendor/bin/pyhp setup`
@@ -40,6 +41,59 @@ Options:
 On Windows, Composer also creates `vendor\bin\pyhp.bat`, so `vendor\bin\pyhp setup` works in Command Prompt and PowerShell.
 
 Setup installs packages; it doesn't remove ones you take out of the list. To start clean, delete the `.venv` folder and run setup again.
+
+## `vendor/bin/pyhp info`
+
+When something doesn't work, run this first and include its output in bug reports:
+
+```bat
+vendor/bin/pyhp info
+```
+
+It checks everything between your PHP code and Python, in the order PyHP uses it:
+
+| Section | What it shows |
+|---|---|
+| **PyHP** | The installed PyHP version. |
+| **PHP** | Version, thread safety, 32/64-bit, the `php` binary, the OS, the loaded `php.ini`, and whether `proc_open()` is allowed (PyHP needs it to start Python). |
+| **Project** | The project root, the Python version and packages it asks for in `extra.pyhp` (or `requirements.txt`). |
+| **Python** | The interpreter PyHP will use and **why** (the `PYHP_PYTHON` variable, the project's venv, or the default command), the venv folder, uv's version if installed, Python's version and real executable, each required package with its installed version or `missing`, and a live test: it starts a PyHP worker and times its first answer. |
+| **Problems** | Everything that needs fixing, with the command that fixes it. |
+
+Example:
+
+```
+PyHP v0.2.0
+
+PHP
+  Version        8.4.1 (cli, NTS, 64-bit)
+  Binary         C:\php\php.exe
+  OS             Windows 10.0 (AMD64)
+  php.ini        C:\php\php.ini
+  proc_open      available
+
+Project
+  Root           D:\projects\shop
+  Python wanted  3.12
+  Requirements   pandas>=2, scikit-learn
+
+Python
+  Interpreter    D:\projects\shop\.venv\Scripts\python.exe
+  Chosen by      the project's virtual environment
+  Project venv   D:\projects\shop\.venv
+  uv             uv 0.9.5 at C:\Users\you\.local\bin\uv.exe
+  Version        3.12.7 (CPython)
+  Executable     D:\projects\shop\.venv\Scripts\python.exe
+  Packages       pandas 3.1.1, scikit-learn missing
+  Worker         started and answered in 85 ms
+
+Problems:
+  - Not installed: scikit-learn. Run: vendor/bin/pyhp setup
+```
+
+It exits with code 0 when everything looks fine and 1 when it found problems, so CI and deploy scripts can run it as a check.
+
+`info` reports what PyHP picks **when your code doesn't choose**. If your application sets the `python` option (`Py::config(['python' => ...])`), that interpreter is used instead. `Config::locatePython()` returns the same answer as `info` from PHP code: the interpreter, the reason (`PythonSource`) and the venv folder.
 
 ---
 
