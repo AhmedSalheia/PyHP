@@ -27,6 +27,7 @@ All notable changes to PyHP are documented here. The format follows
 - Python dicts now travel to PHP as plain JSON objects, and each response says whether it contains any tagged value. Plain results skip PHP's decode pass: copying 100k rows × 4 columns dropped from a 207 MB to a 60 MB memory peak, and from ~1.6 s to ~0.65 s (Linux).
 
 ### Fixed
+- CI on Windows: text files are now always checked out with LF line endings (`.gitattributes`), so Pint passes on Windows runners.
 - README: a stale copy of the old performance section was left inside the new one.
 - Windows start-up took ~650 ms because PHP waits 500 ms whenever it closes a listening socket. The worker now listens (loopback only, until PHP has connected) and PHP connects as a client, authenticating with the token. Workers that nobody connects to exit after `startup_timeout`.
 - A failed start no longer leaks the socket or the temporary log file.
