@@ -22,8 +22,7 @@ PyHP/
 ├── tests/python/              pytest tests for the worker
 ├── examples/                  runnable examples + sample data
 ├── benchmarks/                overhead.php, startup-trace.php
-├── studies/                   feasibility studies for possible features
-└── docs/PROJECT_CONTEXT.md    design decisions and roadmap
+└── docs/                      the documentation you're reading
 ```
 
 ### PHP checks (Windows)

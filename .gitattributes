@@ -5,3 +5,20 @@
 # Shell hooks must keep LF endings or Git's sh on Windows can't run them.
 .githooks/* text eol=lf
 *.sh text eol=lf
+
+# Files contributors need but applications installing PyHP don't: Composer's
+# downloads (GitHub archives) leave them out, so vendor/pyhp/pyhp only holds
+# src/, bin/, python/, composer.json, README, CHANGELOG and LICENSE.
+/.github export-ignore
+/.githooks export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/benchmarks export-ignore
+/docs export-ignore
+/examples export-ignore
+/tests export-ignore
+/phpstan.neon export-ignore
+/phpunit.xml export-ignore
+/pyproject.toml export-ignore
+/requirements-dev.txt export-ignore
+/ROADMAP.md export-ignore
