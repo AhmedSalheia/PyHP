@@ -32,7 +32,7 @@ test('a pandas workflow runs on real DataFrames through proxies', function (): v
     $totals = $big->groupby('region')['amount']->sum()->sort_values(ascending: false);
 
     expect($df)->toBeInstanceOf(PyObject::class)
-        ->and(Py::type($df))->toBe('pandas.DataFrame')
+        ->and(Py::type($df))->toMatch('/^pandas\.(core\.frame\.)?DataFrame$/') // the module name differs between pandas versions
         ->and($df->shape)->toBe([4, 2])
         ->and($totals->to_dict())->toBe(['north' => 3000, 'east' => 2500])
         ->and($df['amount']->sum())->toBe(5800)

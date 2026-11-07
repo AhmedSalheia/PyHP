@@ -96,34 +96,90 @@ To work on a local copy instead (for example to try changes to PyHP itself), add
 }
 ```
 
-**2. Create a virtual environment for your Python libraries** (recommended, so your project's Python packages are isolated):
+**2. Declare the Python packages your project needs**, in your project's `composer.json`:
 
-Windows (Command Prompt / PowerShell):
+```json
+{
+    "extra": {
+        "pyhp": {
+            "python": "3.12",
+            "requirements": ["pandas>=2", "numpy"]
+        }
+    }
+}
+```
+
+**3. Build the Python environment:**
 
 ```bat
-py -3 -m venv .venv
-.venv\Scripts\python.exe -m pip install pandas numpy
+vendor/bin/pyhp setup
 ```
 
-Linux / macOS:
+That creates a virtual environment in `.venv` and installs the packages into it. PyHP then uses it automatically: no configuration, no "activating" the venv.
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install pandas numpy
+### `vendor/bin/pyhp setup`
+
+Run it from your project's root folder (where `composer.json` is). It's safe to run again: an existing `.venv` is reused and only the packages are brought up to date, so run it after changing `requirements`, after cloning the project, in CI and in your Dockerfile.
+
+**With [uv](https://docs.astral.sh/uv/) installed** (recommended), setup uses it: `uv venv` creates the environment and **downloads the requested Python version if the machine doesn't have it**, and `uv pip install` installs packages many times faster than pip. Install uv once per machine:
+
+```bat
+winget install --id=astral-sh.uv -e                     :: Windows
+curl -LsSf https://astral.sh/uv/install.sh | sh          # Linux / macOS
 ```
 
-**3. Tell PyHP which interpreter to use:**
+**Without uv**, setup uses the Python already installed: the `py` launcher on Windows (`py -3.12`), or `python3.12` / `python3` / `python` elsewhere, then `python -m venv` and `pip`. It needs Python 3.10 or newer; if the requested version isn't installed, it uses another 3.10+ version and says so.
+
+Settings, all optional, under `extra.pyhp` in `composer.json`:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `python` | uv's or the system's choice | Python version for the environment, like `"3.12"`. |
+| `requirements` | `requirements.txt` if it exists | A list of packages in pip syntax (`["pandas>=2", "spacy==3.8.*"]`), or the path of a requirements file (`"python/requirements.txt"`). |
+| `venv` | `.venv` | Folder of the environment, relative to the project root or absolute. |
+
+Options:
+
+| Option | Effect |
+|---|---|
+| `--python=3.13` | Overrides `extra.pyhp.python`. |
+| `--venv=DIR` | Overrides `extra.pyhp.venv`. |
+| `--no-uv` | Don't use uv even if it's installed. |
+| `--dry-run` | Only print the commands it would run. |
+
+On Windows, Composer also creates `vendor\bin\pyhp.bat`, so `vendor\bin\pyhp setup` works in Command Prompt and PowerShell.
+
+Setup installs packages; it doesn't remove ones you take out of the list. To start clean, delete the `.venv` folder and run setup again.
+
+### Which Python PyHP uses
+
+When you don't set the `python` option, PyHP picks the interpreter in this order:
+
+1. The `PYHP_PYTHON` environment variable.
+2. The project's virtual environment: `.venv` (or `extra.pyhp.venv`) in the root of the Composer project, whatever the current directory is, so it also works from `public/index.php`.
+3. `python` on Windows, `python3` elsewhere, found through your `PATH`.
+
+`Config::detectPython()` returns that choice. To use any other interpreter, set it explicitly:
 
 ```php
 use PyHP\Py;
 
-Py::config(['python' => __DIR__ . '/.venv/Scripts/python.exe']);   // Windows
-Py::config(['python' => __DIR__ . '/.venv/bin/python']);           // Linux/macOS
+Py::config(['python' => 'C:/tools/python312/python.exe']);
 ```
 
-You don't need to "activate" the venv. Pointing at its interpreter is enough.
+### Without the setup command
 
-If you don't configure anything, PyHP runs `python` on Windows and `python3` elsewhere, found through your `PATH`.
+You can also build the environment yourself; PyHP still finds a `.venv` in the project root:
+
+```bat
+py -3 -m venv .venv                                   :: Windows
+.venv\Scripts\python.exe -m pip install pandas numpy
+```
+
+```bash
+python3 -m venv .venv                                  # Linux / macOS
+.venv/bin/python -m pip install pandas numpy
+```
 
 ---
 
@@ -247,7 +303,7 @@ Use these keys with `Py::config()`, `Py::session()` and `Config::fromArray()`. U
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `python` | string | `python` (Windows), `python3` (others) | The interpreter: a command on `PATH` or a full path. Point it at a venv's interpreter to use that venv. |
+| `python` | string | see [Which Python PyHP uses](#which-python-pyhp-uses) | The interpreter: a command on `PATH` or a full path. Point it at a venv's interpreter to use that venv. |
 | `timeout` | float\|null | `30` | Seconds **one call** may take. `null` = wait forever. On timeout the worker is killed (see [Errors](#errors)). |
 | `startup_timeout` | float | `10` | Seconds to wait for the worker to start and connect. |
 | `cwd` | string\|null | `null` (PHP's) | Working directory of the Python process. Relative paths *inside Python* resolve against it. |
@@ -970,9 +1026,12 @@ PyHP/
 │   ├── Vars.php, Functions.php
 │   ├── PyObject.php           the proxy
 │   ├── Config.php, OutputMode.php
+│   ├── Setup/                 pyhp setup: SetupConfig, Installer, ProcessRunner
+│   ├── Console/               the vendor/bin/pyhp command line
 │   ├── Value/                 Tuple, Slice, Dict markers
 │   ├── Exception/             exception hierarchy
 │   └── Internal/              Worker (process + socket), Codec (wire format)
+├── bin/pyhp                   command line tool (vendor/bin/pyhp)
 ├── python/pyhp_worker.py      the worker (standard library only)
 ├── tests/php/                 Pest tests (need a real interpreter)
 ├── tests/python/              pytest tests for the worker

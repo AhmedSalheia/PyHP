@@ -28,6 +28,9 @@
         "pestphp/pest": "^3.0",
         "phpstan/phpstan": "^2.0"
     },
+    "bin": [
+        "bin/pyhp"
+    ],
     "autoload": {
         "psr-4": {
             "PyHP\\": "src/"

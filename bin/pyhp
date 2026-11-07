@@ -1,0 +1,34 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// vendor/bin/pyhp: sets up a project's Python environment. Run "vendor/bin/pyhp help".
+
+use PyHP\Console\Application;
+use PyHP\Setup\ProcessRunner;
+
+$autoload = $GLOBALS['_composer_autoload_path'] ?? null; // set by Composer's bin proxy (Composer 2.2+)
+foreach ([$autoload, __DIR__.'/../../../autoload.php', __DIR__.'/../vendor/autoload.php'] as $candidate) {
+    if (is_string($candidate) && is_file($candidate)) {
+        require $candidate;
+        break;
+    }
+}
+if (! class_exists(Application::class)) {
+    fwrite(STDERR, "pyhp: could not find Composer's autoloader. Run composer install first.\n");
+    exit(1);
+}
+
+$cwd = getcwd();
+$application = new Application(
+    new ProcessRunner,
+    static function (string $text): void {
+        fwrite(STDOUT, $text);
+    },
+    static function (string $text): void {
+        fwrite(STDERR, $text);
+    },
+);
+
+exit($application->run(array_values(array_slice($argv, 1)), $cwd === false ? '.' : $cwd));

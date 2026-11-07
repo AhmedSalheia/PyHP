@@ -5,6 +5,7 @@ declare(strict_types=1);
 use PyHP\Config;
 use PyHP\OutputMode;
 use PyHP\Session;
+use PyHP\Setup\CommandRunner;
 
 /*
  * Every test talks to a real Python interpreter. Choose which one with the
@@ -63,4 +64,54 @@ function removeDirectory(string $dir): void
         $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
     }
     rmdir($dir);
+}
+
+/**
+ * Stands in for real processes in the setup tests: records every command and
+ * answers find()/capture() from what the test configured.
+ */
+final class FakeCommandRunner implements CommandRunner
+{
+    /** @var list<array{command: list<string>, cwd: string}> */
+    public array $ran = [];
+
+    /**
+     * @param  array<string, string>  $programs  program name => path that find() reports
+     * @param  array<string, string>  $captures  command line (joined with spaces) => its output
+     * @param  array<string, int>  $exitCodes  command line => exit code (default 0)
+     * @param  (Closure(list<string>): void)|null  $onRun  side effect of running a command, e.g. creating the venv
+     */
+    public function __construct(
+        private readonly array $programs = [],
+        private readonly array $captures = [],
+        private readonly array $exitCodes = [],
+        private readonly ?Closure $onRun = null,
+    ) {}
+
+    public function find(string $program): ?string
+    {
+        return $this->programs[$program] ?? null;
+    }
+
+    public function run(array $command, string $cwd): int
+    {
+        $this->ran[] = ['command' => $command, 'cwd' => $cwd];
+        $code = $this->exitCodes[implode(' ', $command)] ?? 0;
+        if ($code === 0 && $this->onRun !== null) {
+            ($this->onRun)($command);
+        }
+
+        return $code;
+    }
+
+    public function capture(array $command, string $cwd): ?string
+    {
+        return $this->captures[implode(' ', $command)] ?? null;
+    }
+
+    /** @return list<string> every command run, joined with spaces */
+    public function commandLines(): array
+    {
+        return array_map(fn (array $run): string => implode(' ', $run['command']), $this->ran);
+    }
 }
