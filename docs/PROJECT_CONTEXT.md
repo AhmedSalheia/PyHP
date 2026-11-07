@@ -68,6 +68,8 @@ Why a socket instead of pipes: PHP on Windows can't `stream_select()` on pipes, 
 | D19 | An uncaught callback exception is rethrown in PHP as the original object; Python sees `pyhp.PhpError`. |
 | D20 | Callback nesting limit: 32 levels, enforced in Python (`RecursionError`); to be revisited with real use. |
 | D21 | Callbacks only on the thread serving PHP, while PHP waits on a call; background-thread callbacks are out of scope for v1. |
+| D22 | SymPy and spaCy examples with optional Pest suites; CI installs them on Linux only. Merged (PR #11). |
+| D23 | 0.1.0 is released through `release/0.1.0` → `main`; Ahmed's code review happens on that PR, and review fixes are committed to the release branch. |
 
 ## 6. Implemented (as of 2026-11-07)
 
@@ -104,12 +106,13 @@ No Python operators on proxies (use `gt`, `mul`, `__and__`, or `eval`). Callback
 
 Done on 2026-11-07: Windows validation and fixes, imports, `modules`, `classes`, faster bulk data, callbacks study and implementation, MIT license, macOS CI, Windows CI line endings.
 
+Also done: SymPy and spaCy examples and tests (PR #11), pre-commit hook, CI actions on v6.
+
 Next:
 
-1. **Merge `feature/php-callbacks`** after CI is green on all three OSes, and run `composer check` on Windows.
-2. **Ahmed reviews the code** (D13).
-3. **Release prep:** Packagist name check, update the second CI job to `actions/checkout@v6` / `setup-python@v6`, CHANGELOG, tag 0.1.0.
-4. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches, a thread-safe callback mode.
+1. **Release 0.1.0** (D23): Ahmed reviews and merges `release/0.1.0` into `main`, tags `v0.1.0`, submits the package to Packagist, back-merges `main` into `develop`.
+2. After 0.1.0: `Py::ref($object, 'attribute')` for writing into attributes that would otherwise be copied; lossless conversion of integer-like numbers (SymPy `Integer`); more library examples.
+3. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches, a thread-safe callback mode.
 
 ## 10. How Claude should work with me
 
