@@ -4,7 +4,9 @@ All notable changes to PyHP are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+Every change is added under **[@dev]** as soon as it's made; when a version is released, those entries move under its number.
+
+## [@dev]
 
 ### Added
 - `vendor/bin/pyhp setup`: creates the project's Python virtual environment and installs the packages listed under `extra.pyhp.requirements` in `composer.json` (or in `requirements.txt`). Uses uv when installed, which also downloads the requested Python version; otherwise the system Python with venv and pip. Safe to run again; `--python`, `--venv`, `--no-uv` and `--dry-run` options.
@@ -15,6 +17,13 @@ All notable changes to PyHP are documented here. The format follows
 
 ### Changed
 - The examples and the test suite use the interpreter PyHP detects (the repository's `.venv` after `php bin/pyhp setup`) instead of requiring `PYHP_PYTHON` / `PYHP_TEST_PYTHON`; both variables still work.
+- Sessions without a `python` option now use `PYHP_PYTHON`, then the project's `.venv` (or `extra.pyhp.venv`), before falling back to `python`/`python3`. Projects that relied on the system interpreter while having a `.venv` in the project root now get the venv's interpreter.
+- The documentation moved from one long README into numbered files in `docs/` (read in order, starting with `docs/01-introduction.md`). The README is now a short overview with examples, contribution notes and project information.
+- The changelog collects unreleased changes under **[@dev]** instead of "Unreleased".
+- CI installs `requirements-dev.txt` on Linux, so every optional library suite runs there.
+
+### Fixed
+- The pandas test accepts the DataFrame type name of every pandas version (pandas 3.1 reports `pandas.core.frame.DataFrame`, 3.0 reported `pandas.DataFrame`).
 
 ## [0.1.1] - 2026-11-07
 
@@ -43,6 +52,6 @@ First public release.
 - CI on Linux, Windows and macOS with PHP 8.2 / 8.4 and Python 3.10 / 3.13: Pest (80% coverage gate), PHPStan max, Pint, pytest, mypy --strict, ruff.
 - SymPy and spaCy suites on Linux; pandas and NumPy on all three systems.
 
-[Unreleased]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...HEAD
+[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...develop
 [0.1.1]: https://github.com/pyhp-php/pyhp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pyhp-php/pyhp/releases/tag/v0.1.0
