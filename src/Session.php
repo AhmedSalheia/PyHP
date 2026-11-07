@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PyHP;
 
+use Closure;
 use PyHP\Exception\ConversionException;
 use PyHP\Exception\MessageTooLargeException;
 use PyHP\Exception\ProtocolException;
@@ -11,7 +12,7 @@ use PyHP\Exception\PythonException;
 use PyHP\Exception\SessionClosedException;
 use PyHP\Internal\Codec;
 use PyHP\Internal\Worker;
-use stdClass;
+use Throwable;
 
 /**
  * One live Python process with its own global namespace.
@@ -28,6 +29,12 @@ final class Session
     /** Call Python global functions (and classes, and builtins): $py->functions->name(...). */
     public readonly Functions $functions;
 
+    /** Modules bound in the session namespace: $py->modules->pd. */
+    public readonly Modules $modules;
+
+    /** Python classes (yours, imported ones and builtins): $py->classes->Invoice(...). */
+    public readonly Classes $classes;
+
     private ?Worker $worker;
 
     private readonly Codec $codec;
@@ -37,11 +44,41 @@ final class Session
     /** @var list<int> */
     private array $pendingReleases = [];
 
+    /**
+     * PHP closures Python currently holds, by callback id.
+     *
+     * @var array<int, Closure>
+     */
+    private array $callbacks = [];
+
+    /**
+     * Callback id of each registered closure, by spl_object_id(). Stable because
+     * $callbacks keeps the closures alive.
+     *
+     * @var array<int, int>
+     */
+    private array $callbackIds = [];
+
+    private int $nextCallbackId = 1;
+
+    /**
+     * Exceptions thrown by callbacks during the current call, by callback call
+     * number, so the original object can be rethrown when it surfaces.
+     *
+     * @var array<int, Throwable>
+     */
+    private array $callbackErrors = [];
+
+    /** How many requests are in progress (more than one while callbacks call Python). */
+    private int $requestDepth = 0;
+
     public function __construct(private readonly Config $config = new Config)
     {
         $this->codec = new Codec($this);
         $this->vars = new Vars($this);
         $this->functions = new Functions($this);
+        $this->modules = new Modules($this);
+        $this->classes = new Classes($this);
         $this->worker = Worker::start($config);
     }
 
@@ -83,19 +120,20 @@ final class Session
     }
 
     /**
-     * Import a module and return a proxy to it.
+     * Import like Python does, binding the name in the session namespace:
      *
-     * With $as, the module is also bound to that name in the session namespace,
-     * like "import pandas as pd", so later exec() code can use it.
+     *     import('pandas')                    import pandas           (binds pandas)
+     *     import('pandas', as: 'pd')          import pandas as pd     (binds pd)
+     *     import('os.path')                   import os.path          (binds os, returns os.path)
+     *     import('time', from: 'datetime')    from datetime import time
+     *     import('*', from: 'math')           from math import *      (returns null)
+     *
+     * Returns what was imported: a module or class proxy, or a plain PHP value
+     * when the imported name is plain data (e.g. import('pi', from: 'math')).
      */
-    public function import(string $module, ?string $as = null): PyObject
+    public function import(string $module, ?string $as = null, ?string $from = null): mixed
     {
-        $result = $this->request('import', ['module' => $module, 'as' => $as]);
-        if (! $result instanceof PyObject) {
-            throw new ProtocolException('import did not return a module reference.');
-        }
-
-        return $result;
+        return $this->request('import', ['module' => $module, 'as' => $as, 'from' => $from]);
     }
 
     /** Text printed by Python since the last call, in OutputMode::Capture. Clears the buffer. */
@@ -116,7 +154,7 @@ final class Session
     /**
      * Details about the running worker.
      *
-     * @return array{protocol: int, python: string, executable: string, objects: int, pid: int}
+     * @return array{protocol: int, python: string, executable: string, objects: int, callbacks: int, pid: int}
      */
     public function info(): array
     {
@@ -135,6 +173,7 @@ final class Session
             'python' => is_string($python) ? $python : '',
             'executable' => is_string($executable) ? $executable : '',
             'objects' => is_int($objects) ? $objects : 0,
+            'callbacks' => count($this->callbacks),
             'pid' => $pid,
         ];
     }
@@ -145,6 +184,8 @@ final class Session
         $this->worker?->stop();
         $this->worker = null;
         $this->pendingReleases = [];
+        $this->callbacks = [];
+        $this->callbackIds = [];
     }
 
     /**
@@ -156,8 +197,6 @@ final class Session
      */
     public function request(string $op, array $fields = []): mixed
     {
-        // Fetched through a helper so static analysis doesn't assume the worker is still
-        // running after roundTrip(), which can stop it (timeout, crash).
         $worker = $this->runningWorker();
 
         $releases = $this->pendingReleases;
@@ -167,26 +206,186 @@ final class Session
         }
         $json = Codec::toJson($message);
         $this->pendingReleases = [];
+        $timeout = $this->config->timeout;
+        $deadline = $timeout === null ? null : microtime(true) + $timeout;
 
+        $this->requestDepth++;
         try {
-            $response = Codec::fromJson($worker->roundTrip($json, $this->config->timeout));
-        } catch (MessageTooLargeException $error) {
-            // Nothing was sent, so the releases are still owed to the worker.
-            $this->pendingReleases = $releases;
-            throw $error;
+            try {
+                $worker->send($json, $deadline, $timeout);
+            } catch (MessageTooLargeException $error) {
+                // Nothing was sent, so the releases are still owed to the worker.
+                $this->pendingReleases = $releases;
+                throw $error;
+            }
+            $response = $this->awaitResponse($deadline, $timeout);
+
+            $this->handleOutput($response['out'] ?? '');
+
+            if (($response['ok'] ?? false) !== true) {
+                throw $this->errorFrom($response['error'] ?? null);
+            }
+
+            $value = $response['value'] ?? null;
+
+            // Plain results (no references, bytes or NaN/Inf anywhere) are already
+            // the final PHP value: skip the decode pass and its full copy.
+            return ($response['tagged'] ?? true) === false ? $value : $this->codec->decode($value);
         } finally {
-            if (! $worker->isRunning()) {
+            $this->requestDepth--;
+            if ($this->requestDepth === 0) {
+                $this->callbackErrors = [];
+            }
+            if ($this->worker !== null && ! $this->worker->isRunning()) {
                 $this->worker = null;
             }
         }
+    }
 
-        $this->handleOutput($response->out ?? '');
+    /**
+     * The id under which Python knows this closure; registers it on first use.
+     *
+     * @internal Used by Codec.
+     */
+    public function callbackId(Closure $closure): int
+    {
+        $objectId = spl_object_id($closure);
+        if (isset($this->callbackIds[$objectId])) {
+            return $this->callbackIds[$objectId];
+        }
+        $id = $this->nextCallbackId++;
+        $this->callbacks[$id] = $closure;
+        $this->callbackIds[$objectId] = $id;
 
-        if (($response->ok ?? false) !== true) {
-            throw $this->errorFrom($response->error ?? null);
+        return $id;
+    }
+
+    /**
+     * @internal Used by Codec.
+     */
+    public function callback(int $id): Closure
+    {
+        return $this->callbacks[$id]
+            ?? throw new ProtocolException("The worker referred to unknown PHP callback #{$id}.");
+    }
+
+    /**
+     * Read frames until the response arrives, running PHP callbacks Python asks for.
+     *
+     * @return array<array-key, mixed>
+     */
+    private function awaitResponse(?float $deadline, ?float $timeout): array
+    {
+        while (true) {
+            $frame = Codec::fromJson($this->runningWorker()->receive($deadline, $timeout));
+            $this->forgetCallbacks($frame['release_callbacks'] ?? null);
+            if (($frame['op'] ?? null) !== 'php_call') {
+                return $frame;
+            }
+
+            $started = microtime(true);
+            [$reply, $thrown] = $this->runCallback($frame);
+            if ($deadline !== null) {
+                // The timeout limits Python; time spent running PHP doesn't count.
+                $deadline += microtime(true) - $started;
+            }
+            $this->sendReply($reply, $thrown, $deadline, $timeout);
+        }
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $frame
+     * @return array{0: array<string, mixed>, 1: Throwable|null}
+     */
+    private function runCallback(array $frame): array
+    {
+        $seq = $frame['seq'] ?? null;
+        $id = $frame['cb'] ?? null;
+        if (! is_int($seq) || ! is_int($id)) {
+            throw new ProtocolException('The worker sent an invalid callback call.');
         }
 
-        return $this->codec->decode($response->value ?? null);
+        try {
+            $closure = $this->callback($id);
+            $tagged = ($frame['tagged'] ?? true) !== false;
+            $args = $tagged ? $this->codec->decode($frame['args'] ?? []) : ($frame['args'] ?? []);
+            $kwargs = $tagged ? $this->codec->decode($frame['kwargs'] ?? []) : ($frame['kwargs'] ?? []);
+            if (! is_array($args) || ! array_is_list($args) || ! is_array($kwargs)) {
+                throw new ProtocolException('The worker sent invalid callback arguments.');
+            }
+            $value = $this->codec->encode($closure(...$args, ...$kwargs));
+
+            return [$this->withReleases(['op' => 'php_return', 'seq' => $seq, 'ok' => true, 'value' => $value]), null];
+        } catch (Throwable $error) {
+            // Not swallowed: it travels to Python as PhpError, and the original
+            // object is rethrown here if Python doesn't catch it.
+            return [$this->withReleases($this->callbackFailure($seq, $error)), $error];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $reply
+     */
+    private function sendReply(array $reply, ?Throwable $thrown, ?float $deadline, ?float $timeout): void
+    {
+        $worker = $this->worker;
+        if ($worker === null || ! $worker->isRunning()) {
+            // The callback closed the session (or a nested call killed the worker).
+            throw $thrown ?? new SessionClosedException('The session was closed inside a PHP callback.');
+        }
+        try {
+            $worker->send(Codec::toJson($reply), $deadline, $timeout);
+        } catch (MessageTooLargeException|ConversionException $error) {
+            $seq = $reply['seq'] ?? 0;
+            $worker->send(Codec::toJson($this->callbackFailure(is_int($seq) ? $seq : 0, $error)), $deadline, $timeout);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function callbackFailure(int $seq, Throwable $error): array
+    {
+        $this->callbackErrors[$seq] = $error;
+
+        return [
+            'op' => 'php_return',
+            'seq' => $seq,
+            'ok' => false,
+            'error' => [
+                'class' => $error::class,
+                'message' => $error->getMessage(),
+                'file' => $error->getFile(),
+                'line' => $error->getLine(),
+                'id' => $seq,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $message
+     * @return array<string, mixed>
+     */
+    private function withReleases(array $message): array
+    {
+        if ($this->pendingReleases !== []) {
+            $message['release'] = $this->pendingReleases;
+            $this->pendingReleases = [];
+        }
+
+        return $message;
+    }
+
+    private function forgetCallbacks(mixed $ids): void
+    {
+        if (! is_array($ids)) {
+            return;
+        }
+        foreach ($ids as $id) {
+            if (is_int($id) && isset($this->callbacks[$id])) {
+                unset($this->callbackIds[spl_object_id($this->callbacks[$id])], $this->callbacks[$id]);
+            }
+        }
     }
 
     /**
@@ -231,15 +430,20 @@ final class Session
         }
     }
 
-    private function errorFrom(mixed $error): \Throwable
+    private function errorFrom(mixed $error): Throwable
     {
-        if (! $error instanceof stdClass) {
+        if (! is_array($error)) {
             return new ProtocolException('The worker reported a failure without details.');
         }
-        $kind = $error->kind ?? null;
-        $type = is_string($error->type ?? null) ? $error->type : 'Exception';
-        $message = is_string($error->message ?? null) ? $error->message : '';
-        $traceback = is_string($error->traceback ?? null) ? $error->traceback : '';
+        $phpError = $error['php_error'] ?? null;
+        if (is_int($phpError) && isset($this->callbackErrors[$phpError])) {
+            // A PHP callback threw and Python didn't catch it: rethrow the original.
+            return $this->callbackErrors[$phpError];
+        }
+        $kind = $error['kind'] ?? null;
+        $type = is_string($error['type'] ?? null) ? $error['type'] : 'Exception';
+        $message = is_string($error['message'] ?? null) ? $error['message'] : '';
+        $traceback = is_string($error['traceback'] ?? null) ? $error['traceback'] : '';
 
         return match ($kind) {
             'python' => new PythonException($type, $message, $traceback),

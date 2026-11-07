@@ -10,6 +10,7 @@ require __DIR__.'/../vendor/autoload.php';
 
 use PyHP\Config;
 use PyHP\OutputMode;
+use PyHP\Py;
 use PyHP\Session;
 
 $python = $argv[1] ?? Config::defaultPython();
@@ -61,9 +62,17 @@ if ($hasPandas === true) {
     $t = microtime(true);
     $py->eval("df.groupby('g')['v'].mean().to_dict()");
     printf("Same groupby in one eval:         %7.1f ms\n", $ms($t));
+    $py->exec('rows100k = df.head(100_000)');
+    $rows100k = $py->vars->rows100k;
     $t = microtime(true);
-    $py->eval("df.head(100_000).to_dict('records')");
-    printf("Copy 100k rows to PHP:            %7.1f ms\n", $ms($t));
+    $rows100k->to_dict('records');
+    printf("Copy 100k rows, to_dict('records'): %5.1f ms\n", $ms($t));
+    $t = microtime(true);
+    Py::rows($rows100k);
+    printf("Copy 100k rows, Py::rows():         %5.1f ms\n", $ms($t));
+    $t = microtime(true);
+    Py::columns($rows100k);
+    printf("Copy 100k rows, Py::columns():      %5.1f ms\n", $ms($t));
 } else {
     echo "pandas not installed: skipping pandas timings\n";
 }

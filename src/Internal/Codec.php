@@ -27,8 +27,10 @@ final class Codec
 {
     public const MAX_DEPTH = 256;
 
+    // Values are checked for valid UTF-8 one by one (invalid strings travel as
+    // bytes); the substitute flag only protects free text such as error messages.
     private const JSON_ENCODE_FLAGS = JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE
-        | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION;
+        | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_INVALID_UTF8_SUBSTITUTE;
 
     /** @var (Closure(PyObject): array{0: Session, 1: int})|null */
     private static ?Closure $unwrap = null;
@@ -47,14 +49,20 @@ final class Codec
         }
     }
 
-    public static function fromJson(string $json): stdClass
+    /**
+     * Decodes a worker message. JSON objects become PHP arrays directly, so a
+     * plain result (no tagged values) needs no second pass and no extra copy.
+     *
+     * @return array<array-key, mixed>
+     */
+    public static function fromJson(string $json): array
     {
         try {
-            $message = json_decode($json, false, self::MAX_DEPTH * 2 + 8, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
+            $message = json_decode($json, true, self::MAX_DEPTH * 2 + 8, JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING);
         } catch (\JsonException $error) {
             throw new ProtocolException('The worker sent invalid JSON: '.$error->getMessage(), 0, $error);
         }
-        if (! $message instanceof stdClass) {
+        if (! is_array($message) || array_is_list($message)) {
             throw new ProtocolException('The worker sent a message that is not a JSON object.');
         }
 
@@ -97,9 +105,7 @@ final class Codec
             ],
             $value instanceof Slice => ['$t' => 'slice', 'v' => [$value->start, $value->stop, $value->step]],
             $value instanceof Dict => $this->encodeDict($value->items, $depth),
-            $value instanceof Closure => throw new ConversionException(
-                'A PHP Closure cannot be passed to Python (callbacks are not supported yet).'
-            ),
+            $value instanceof Closure => ['$t' => 'callback', 'id' => $this->session->callbackId($value)],
             default => throw new ConversionException(sprintf(
                 'A PHP %s cannot be sent to Python. Send scalars, arrays, Python object proxies, '
                 .'or Py::tuple()/Py::slice()/Py::dict() values.',
@@ -131,26 +137,28 @@ final class Codec
     }
 
     /**
-     * Wire value -> PHP value.
+     * Wire value (as decoded by fromJson) -> PHP value.
+     *
+     * Plain JSON already is the PHP value. Tagged values are arrays with a "$t"
+     * key; a Python dict that really has a "$t" key arrives wrapped in a "dict"
+     * tag, so the two can't be confused.
      */
     public function decode(mixed $data): mixed
     {
-        if ($data === null || is_bool($data) || is_int($data) || is_float($data) || is_string($data)) {
+        if (! is_array($data)) {
             return $data;
         }
-        if (is_array($data)) {
+        if (! array_key_exists('$t', $data)) {
             return array_map(fn (mixed $item): mixed => $this->decode($item), $data);
         }
-        if (! $data instanceof stdClass) {
-            throw new ProtocolException('Unexpected value on the wire: '.get_debug_type($data));
-        }
 
-        $tag = $data->{'$t'} ?? null;
-        $raw = $data->v ?? null;
+        $tag = $data['$t'];
+        $raw = $data['v'] ?? null;
 
         return match ($tag) {
             'ref' => $this->decodeRef($data),
-            'dict' => $this->decodeDict($raw),
+            'callback' => $this->session->callback(is_int($data['id'] ?? null) ? $data['id'] : -1),
+            'dict' => $this->decodeDict($data['o'] ?? null),
             'bytes' => $this->decodeBytes($raw),
             'float' => match ($raw) {
                 'nan' => NAN,
@@ -219,10 +227,13 @@ final class Codec
         return ['$t' => 'dict', 'v' => $pairs];
     }
 
-    private function decodeRef(stdClass $data): PyObject
+    /**
+     * @param  array<array-key, mixed>  $data
+     */
+    private function decodeRef(array $data): PyObject
     {
-        $id = $data->id ?? null;
-        $type = $data->type ?? null;
+        $id = $data['id'] ?? null;
+        $type = $data['type'] ?? null;
         if (! is_int($id) || ! is_string($type)) {
             throw new ProtocolException('Invalid object reference on the wire.');
         }
@@ -233,20 +244,13 @@ final class Codec
     /**
      * @return array<array-key, mixed>
      */
-    private function decodeDict(mixed $pairs): array
+    private function decodeDict(mixed $object): array
     {
-        if (! is_array($pairs)) {
+        if (! is_array($object)) {
             throw new ProtocolException('Invalid dict on the wire.');
         }
-        $result = [];
-        foreach ($pairs as $pair) {
-            if (! is_array($pair) || count($pair) !== 2 || ! (is_int($pair[0]) || is_string($pair[0]))) {
-                throw new ProtocolException('Invalid dict entry on the wire.');
-            }
-            $result[$pair[0]] = $this->decode($pair[1]);
-        }
 
-        return $result;
+        return array_map(fn (mixed $item): mixed => $this->decode($item), $object);
     }
 
     private function decodeBytes(mixed $raw): string

@@ -8,6 +8,7 @@ import socket
 import struct
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,12 +45,25 @@ class Connection:
         return chunks
 
 
-def start_worker(tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000) -> Connection:
-    server = socket.create_server(("127.0.0.1", 0))
-    server.settimeout(10)
-    port = server.getsockname()[1]
+def frame(message: dict[str, object]) -> bytes:
+    body = json.dumps(message).encode()
+    return HEADER.pack(len(body)) + body
+
+
+def launch(
+    tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000, startup_timeout: float = 10
+) -> tuple[subprocess.Popen[bytes], int, Path]:
+    """Start the worker; return the process, the port it listens on, and its log."""
+    port_file = tmp_path / "port"
+    port_file.write_text("")
     log = tmp_path / "worker.log"
-    env = dict(os.environ, PYHP_PORT=str(port), PYHP_TOKEN=token, PYHP_MAX_FRAME=str(max_frame))
+    env = dict(
+        os.environ,
+        PYHP_PORT_FILE=str(port_file),
+        PYHP_TOKEN=token,
+        PYHP_MAX_FRAME=str(max_frame),
+        PYHP_STARTUP_TIMEOUT=str(startup_timeout),
+    )
     with log.open("wb") as log_file:
         process = subprocess.Popen(  # noqa: S603  # fixed argv, no shell
             [sys.executable, "-u", str(WORKER)],
@@ -58,9 +72,18 @@ def start_worker(tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000)
             stderr=log_file,
             env=env,
         )
-    sock, _ = server.accept()
-    server.close()
-    sock.settimeout(10)
+    deadline = time.monotonic() + 10
+    while not port_file.read_text().endswith("\n"):
+        assert process.poll() is None, log.read_text()
+        assert time.monotonic() < deadline, "worker never published its port"
+        time.sleep(0.005)
+    return process, int(port_file.read_text()), log
+
+
+def start_worker(tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000) -> Connection:
+    process, port, log = launch(tmp_path, token, max_frame)
+    sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+    sock.sendall(frame({"op": "auth", "token": token}))
     return Connection(sock, process, log)
 
 
@@ -76,7 +99,7 @@ def test_worker_sends_hello_with_token_first(worker: Connection) -> None:
     hello = worker.receive()
     assert hello["op"] == "hello"
     assert hello["token"] == TOKEN
-    assert hello["protocol"] == 1
+    assert hello["protocol"] == 2
 
 
 def test_worker_answers_requests_and_keeps_state(worker: Connection) -> None:
@@ -108,12 +131,15 @@ def test_user_output_never_reaches_the_protocol_channel(worker: Connection) -> N
     assert "err" in log_text
 
 
-def test_secret_environment_is_removed_from_user_code(worker: Connection) -> None:
+def test_worker_control_variables_are_removed_from_user_code(worker: Connection) -> None:
+    # The user's own environment (even variables starting with PYHP_) passes through;
+    # only the worker's control variables, including the secret token, are removed.
     worker.receive()
-    worker.send(
-        {"op": "eval", "expr": "[k for k in __import__('os').environ if k.startswith('PYHP_')]"}
-    )
+    names = ["PYHP_PORT", "PYHP_TOKEN", "PYHP_MAX_FRAME", "PYHP_PATHS"]
+    worker.send({"op": "eval", "expr": f"[k for k in {names!r} if k in __import__('os').environ]"})
     assert worker.receive()["value"] == []
+    worker.send({"op": "eval", "expr": f"{TOKEN!r} in __import__('os').environ.values()"})
+    assert worker.receive()["value"] is False
 
 
 def test_input_reads_nothing(worker: Connection) -> None:
@@ -175,5 +201,73 @@ def test_extra_paths_are_added_to_sys_path(tmp_path: Path, monkeypatch: pytest.M
     connection.receive()
     connection.send({"op": "eval", "expr": "__import__('pyhp_extra_module').VALUE"})
     assert connection.receive()["value"] == 7
+    connection.sock.close()
+    connection.process.wait(timeout=10)
+
+
+def test_connections_without_the_token_are_dropped(tmp_path: Path) -> None:
+    process, port, log = launch(tmp_path)
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as rogue:
+        rogue.sendall(frame({"op": "auth", "token": "wrong"}))
+        assert rogue.recv(1) == b""  # closed without a word
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as garbage:
+        garbage.sendall(HEADER.pack(10_000_000))
+        assert garbage.recv(1) == b""
+    connection = Connection(socket.create_connection(("127.0.0.1", port), timeout=10), process, log)
+    connection.sock.sendall(frame({"op": "auth", "token": TOKEN}))
+    assert connection.receive()["op"] == "hello"
+    connection.sock.close()
+    assert process.wait(timeout=10) == 0
+
+
+def test_worker_gives_up_when_nobody_connects(tmp_path: Path) -> None:
+    process, _, log = launch(tmp_path, startup_timeout=0.5)
+    assert process.wait(timeout=10) == 3
+    assert "did not connect" in log.read_text()
+
+
+def test_callbacks_round_trip_over_the_socket(worker: Connection) -> None:
+    worker.receive()
+    worker.send({"op": "exec", "code": "def run(f, x):\n    return f(x) + 1"})
+    worker.receive()
+    worker.send(
+        {
+            "op": "call_global",
+            "name": "run",
+            "args": [{"$t": "callback", "id": 1}, 41],
+            "kwargs": {},
+        }
+    )
+    php_call = worker.receive()
+    assert php_call["op"] == "php_call"
+    assert php_call["args"] == [41]
+    worker.send({"op": "eval", "expr": "2 * 3"})  # PHP calls Python inside the callback
+    assert worker.receive()["value"] == 6
+    worker.send({"op": "php_return", "seq": php_call["seq"], "ok": True, "value": 100})
+    assert worker.receive()["value"] == 101
+
+
+def test_closing_the_connection_during_a_callback_stops_the_worker(worker: Connection) -> None:
+    worker.receive()
+    worker.send({"op": "exec", "code": "def run(f):\n    return f()"})
+    worker.receive()
+    callback = {"$t": "callback", "id": 1}
+    worker.send({"op": "call_global", "name": "run", "args": [callback], "kwargs": {}})
+    assert worker.receive()["op"] == "php_call"
+    worker.sock.close()
+    assert worker.process.wait(timeout=10) == 0
+
+
+def test_oversized_callback_arguments_are_refused(tmp_path: Path) -> None:
+    connection = start_worker(tmp_path, max_frame=2000)
+    connection.receive()
+    connection.send({"op": "exec", "code": "def run(f):\n    return f('x' * 5000)"})
+    connection.receive()
+    callback = {"$t": "callback", "id": 1}
+    connection.send({"op": "call_global", "name": "run", "args": [callback], "kwargs": {}})
+    response = connection.receive()
+    error = response["error"]
+    assert isinstance(error, dict)
+    assert error["kind"] == "conversion"
     connection.sock.close()
     connection.process.wait(timeout=10)

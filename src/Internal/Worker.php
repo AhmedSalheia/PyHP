@@ -27,9 +27,11 @@ use PyHP\Exception\WorkerStartException;
  */
 final class Worker
 {
-    public const PROTOCOL_VERSION = 1;
+    public const PROTOCOL_VERSION = 2;
 
     private const POLL_SECONDS = 0.05;
+
+    private const PORT_POLL_MICROSECONDS = 2_000;
 
     private const STOP_GRACE_SECONDS = 2.0;
 
@@ -58,28 +60,41 @@ final class Worker
 
     public static function start(Config $config): self
     {
-        $server = @stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage);
-        if ($server === false) {
-            throw new WorkerStartException("Could not open a local socket for the Python worker: {$errorMessage} ({$errorCode}).");
-        }
-        $address = stream_socket_get_name($server, false);
-        $port = $address === false ? 0 : (int) substr($address, (int) strrpos($address, ':') + 1);
-
         $token = bin2hex(random_bytes(16));
-        [$logPath, $ownsLog] = self::prepareLog($config);
-        $process = self::launch($config, $port, $token, $logPath);
+        $process = null;
+        $socket = null;
+        $logPath = null;
+        $ownsLog = false;
+        $portFile = null;
 
+        // Python listens and PHP connects, never the other way round: on Windows,
+        // PHP waits 500 ms whenever it closes a listening socket.
+        //
+        // Any failure must release everything acquired so far: the worker
+        // process, the socket and the temporary files.
         try {
-            $socket = self::acceptWorker($server, $process, $config, $logPath);
+            [$logPath, $ownsLog] = self::prepareLog($config);
+            $portFile = self::temporaryFile('pyhp-port-', 'port file');
+            $process = self::launch($config, $portFile, $token, $logPath);
+            $deadline = microtime(true) + $config->startupTimeout;
+            $port = self::waitForPort($portFile, $process, $config, $logPath, $deadline);
+            $socket = self::connect($port, $token, $process, $config, $logPath, $deadline);
             $hello = self::readHello($socket, $config, $token, $logPath, $process);
         } catch (WorkerStartException|ProtocolException $error) {
-            self::terminate($process);
-            if ($ownsLog) {
+            if (is_resource($socket)) {
+                fclose($socket);
+            }
+            if (is_resource($process)) {
+                self::terminate($process);
+            }
+            if ($ownsLog && $logPath !== null) {
                 @unlink($logPath);
             }
             throw $error;
         } finally {
-            fclose($server);
+            if ($portFile !== null) {
+                @unlink($portFile);
+            }
         }
 
         return new self(
@@ -99,38 +114,55 @@ final class Worker
     }
 
     /**
-     * Send one request and wait for its response, within one shared deadline.
+     * Send one frame. The deadline is shared by everything belonging to one call;
+     * $timeout is only used in the error message.
      */
-    public function roundTrip(string $request, ?float $timeout): string
+    public function send(string $message, ?float $deadline, ?float $timeout): void
     {
-        $size = strlen($request);
+        $size = strlen($message);
         if ($size > $this->maxMessageBytes) {
             throw new MessageTooLargeException(
-                "The request is {$size} bytes, above the {$this->maxMessageBytes}-byte max_message_bytes limit."
+                "The message is {$size} bytes, above the {$this->maxMessageBytes}-byte max_message_bytes limit."
             );
         }
-        $deadline = $timeout === null ? null : microtime(true) + $timeout;
 
         try {
-            $this->write(pack('N', $size).$request, $deadline);
+            $this->write(pack('N', $size).$message, $deadline);
+        } catch (TimeoutException $error) {
+            throw $this->timedOut($timeout, $error);
+        }
+    }
+
+    /**
+     * Wait for the next frame from the worker (a response or a callback call).
+     */
+    public function receive(?float $deadline, ?float $timeout): string
+    {
+        try {
             $header = $this->read(4, $deadline);
             $length = unpack('Nlength', $header);
             $length = is_array($length) && is_int($length['length']) ? $length['length'] : -1;
             if ($length < 0 || $length > $this->maxMessageBytes) {
-                throw new ProtocolException("The worker announced an invalid response size ({$length} bytes).");
+                throw new ProtocolException("The worker announced an invalid message size ({$length} bytes).");
             }
 
             return $this->read($length, $deadline);
         } catch (TimeoutException $error) {
-            $this->kill();
-            throw new TimeoutException(sprintf(
-                'The Python call did not finish within the %s-second timeout. The worker was stopped and the session is closed.',
-                (string) $timeout,
-            ), 0, $error);
+            throw $this->timedOut($timeout, $error);
         } catch (ProtocolException $error) {
             $this->kill();
             throw $error;
         }
+    }
+
+    private function timedOut(?float $timeout, TimeoutException $error): TimeoutException
+    {
+        $this->kill();
+
+        return new TimeoutException(sprintf(
+            'The Python call did not finish within the %s-second timeout. The worker was stopped and the session is closed.',
+            (string) $timeout,
+        ), 0, $error);
     }
 
     /** Polite stop: closing the socket makes the worker exit on its own. */
@@ -266,18 +298,24 @@ final class Worker
         if ($config->logFile !== null) {
             return [$config->logFile, false];
         }
-        $path = tempnam(sys_get_temp_dir(), 'pyhp-');
+
+        return [self::temporaryFile('pyhp-', 'log file'), true];
+    }
+
+    private static function temporaryFile(string $prefix, string $purpose): string
+    {
+        $path = tempnam(sys_get_temp_dir(), $prefix);
         if ($path === false) {
-            throw new WorkerStartException('Could not create a temporary log file for the Python worker.');
+            throw new WorkerStartException("Could not create a temporary {$purpose} for the Python worker.");
         }
 
-        return [$path, true];
+        return $path;
     }
 
     /**
      * @return resource
      */
-    private static function launch(Config $config, int $port, string $token, string $logPath)
+    private static function launch(Config $config, string $portFile, string $token, string $logPath)
     {
         $script = dirname(__DIR__, 2).DIRECTORY_SEPARATOR.'python'.DIRECTORY_SEPARATOR.'pyhp_worker.py';
         $command = [$config->python, '-u', $script];
@@ -299,7 +337,7 @@ final class Worker
             return true;
         });
         try {
-            $process = proc_open($command, $descriptors, $pipes, $config->cwd, self::environment($config, $port, $token));
+            $process = proc_open($command, $descriptors, $pipes, $config->cwd, self::environment($config, $portFile, $token));
         } finally {
             restore_error_handler();
         }
@@ -318,7 +356,7 @@ final class Worker
     /**
      * @return array<string, string>
      */
-    private static function environment(Config $config, int $port, string $token): array
+    private static function environment(Config $config, string $portFile, string $token): array
     {
         $base = [];
         if ($config->inheritEnv) {
@@ -335,38 +373,61 @@ final class Worker
         $base += ['PYTHONIOENCODING' => 'utf-8'];
 
         return array_merge($base, $config->env, [
-            'PYHP_PORT' => (string) $port,
+            'PYHP_PORT_FILE' => $portFile,
             'PYHP_TOKEN' => $token,
+            'PYHP_STARTUP_TIMEOUT' => (string) $config->startupTimeout,
             'PYHP_MAX_FRAME' => (string) $config->maxMessageBytes,
             'PYHP_PATHS' => implode(PATH_SEPARATOR, $config->paths),
         ]);
     }
 
     /**
-     * @param  resource  $server
+     * Wait until the worker has written the port it listens on (a number and a newline).
+     *
+     * @param  resource  $process
+     */
+    private static function waitForPort(string $portFile, $process, Config $config, string $logPath, float $deadline): int
+    {
+        while (true) {
+            $contents = @file_get_contents($portFile);
+            if (is_string($contents) && str_ends_with($contents, "\n") && ctype_digit(trim($contents))) {
+                return (int) trim($contents);
+            }
+            if (! self::isAlive($process)) {
+                throw self::startFailure($config, $process, $logPath, 'exited before it was ready');
+            }
+            if (microtime(true) > $deadline) {
+                throw self::startFailure($config, $process, $logPath, "was not ready within {$config->startupTimeout} seconds");
+            }
+            usleep(self::PORT_POLL_MICROSECONDS);
+        }
+    }
+
+    /**
+     * Connect to the worker and prove we are the PHP process that started it.
+     *
      * @param  resource  $process
      * @return resource
      */
-    private static function acceptWorker($server, $process, Config $config, string $logPath)
+    private static function connect(int $port, string $token, $process, Config $config, string $logPath, float $deadline)
     {
-        $deadline = microtime(true) + $config->startupTimeout;
-        while (microtime(true) < $deadline) {
-            $read = [$server];
-            $write = $except = null;
-            if (@stream_select($read, $write, $except, 0, (int) (self::POLL_SECONDS * 1_000_000)) > 0) {
-                $socket = @stream_socket_accept($server, 0);
-                if (is_resource($socket)) {
-                    stream_set_blocking($socket, false);
-
-                    return $socket;
-                }
-            }
-            if (! self::isAlive($process)) {
-                throw self::startFailure($config, $process, $logPath, 'exited before connecting');
-            }
+        $socket = @stream_socket_client(
+            "tcp://127.0.0.1:{$port}",
+            $errorCode,
+            $errorMessage,
+            max(0.1, $deadline - microtime(true)),
+        );
+        if ($socket === false) {
+            throw self::startFailure($config, $process, $logPath, "could not be reached on port {$port}: {$errorMessage} ({$errorCode})");
         }
+        $auth = Codec::toJson(['op' => 'auth', 'token' => $token]);
+        if (@fwrite($socket, pack('N', strlen($auth)).$auth) === false) {
+            fclose($socket);
+            throw self::startFailure($config, $process, $logPath, 'closed the connection during the handshake');
+        }
+        stream_set_blocking($socket, false);
 
-        throw self::startFailure($config, $process, $logPath, "did not connect within {$config->startupTimeout} seconds");
+        return $socket;
     }
 
     /**

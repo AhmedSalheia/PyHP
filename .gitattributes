@@ -1,4 +1,7 @@
-* text=auto
+# Always check out text files with LF line endings, on every OS. Without this,
+# Windows (and GitHub's Windows runners) check out CRLF and Pint's line_ending
+# rule fails on every PHP file.
+* text=auto eol=lf
 # Shell hooks must keep LF endings or Git's sh on Windows can't run them.
 .githooks/* text eol=lf
 *.sh text eol=lf

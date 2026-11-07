@@ -1,0 +1,88 @@
+#!/bin/sh
+# Formats, lints and type-checks what you're about to commit.
+#
+#   PHP files staged    -> Pint formats them (and re-stages them), then PHPStan
+#   Python files staged -> ruff format (re-staged), ruff check, mypy
+#
+# Activate once per clone:  git config core.hooksPath .githooks
+# Tests are left to CI (`composer check` / pytest run them locally too).
+
+set -u
+
+fail() {
+    printf '\npre-commit: %s\n' "$1" >&2
+    exit 1
+}
+
+php_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.php')
+py_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+
+[ -z "$php_files$py_files" ] && exit 0
+
+# Auto-formatting and re-staging a partly staged file would also stage the
+# parts you left out, so refuse instead.
+partly_staged=""
+for file in $php_files $py_files; do
+    if ! git diff --quiet -- "$file"; then
+        partly_staged="$partly_staged
+  $file"
+    fi
+done
+[ -n "$partly_staged" ] && fail "these files also have unstaged changes:$partly_staged
+Stage them completely (git add <file>) or stash the rest (git stash -k), then commit again."
+
+if [ -n "$php_files" ]; then
+    # Git's shell only finds exact file names, so also look for the .exe/.bat/.cmd
+    # shims that Windows installers (Herd, Laragon, Scoop, XAMPP) put on PATH.
+    # Set PYHP_PHP to point at php yourself if it still isn't found.
+    php=${PYHP_PHP:-}
+    if [ -z "$php" ]; then
+        for candidate in php php.exe php.bat php.cmd; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                php=$candidate
+                break
+            fi
+        done
+    fi
+    [ -n "$php" ] || fail "php was not found on the PATH that Git sees.
+If php works in your terminal, commit from that terminal, restart VS Code, or set
+PYHP_PHP to its full path (e.g. setx PYHP_PHP C:/php/php.exe, then reopen the terminal)."
+    [ -f vendor/bin/pint ] || fail "vendor/bin/pint is missing; run: composer install"
+
+    echo "pre-commit: Pint"
+    # shellcheck disable=SC2086 # file names are split on purpose (no spaces in this repo)
+    "$php" vendor/bin/pint --quiet $php_files || fail "Pint could not format the staged PHP files."
+    # shellcheck disable=SC2086
+    git add $php_files
+
+    echo "pre-commit: PHPStan"
+    "$php" vendor/bin/phpstan analyse --no-progress --memory-limit=1G \
+        || fail "PHPStan found problems (see above)."
+fi
+
+if [ -n "$py_files" ]; then
+    if [ -x .venv/Scripts/python.exe ]; then
+        python=.venv/Scripts/python.exe
+    elif [ -x .venv/bin/python ]; then
+        python=.venv/bin/python
+    else
+        python=$(command -v python3 || command -v python || true)
+    fi
+    [ -n "$python" ] && "$python" -m ruff --version >/dev/null 2>&1 \
+        || fail "ruff is not installed. Run: .venv/Scripts/python.exe -m pip install ruff mypy (Windows) or .venv/bin/python -m pip install ruff mypy"
+
+    echo "pre-commit: ruff format"
+    # shellcheck disable=SC2086
+    "$python" -m ruff format --quiet $py_files || fail "ruff could not format the staged Python files."
+    # shellcheck disable=SC2086
+    git add $py_files
+
+    echo "pre-commit: ruff check"
+    # shellcheck disable=SC2086
+    "$python" -m ruff check $py_files || fail "ruff found problems (see above)."
+
+    echo "pre-commit: mypy"
+    "$python" -m mypy || fail "mypy found problems (see above)."
+fi
+
+exit 0

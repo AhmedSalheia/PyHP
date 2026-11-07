@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import builtins
 import contextlib
+import hmac
 import importlib
 import io
 import json
@@ -28,19 +29,30 @@ import re
 import socket
 import struct
 import sys
+import threading
+import time
 import tokenize
 import traceback
 import types
-from collections.abc import Callable, Iterator
+import weakref
+from collections.abc import Callable, Iterable, Iterator
 from typing import Final, Protocol, TypeAlias, cast
 
-PROTOCOL_VERSION: Final = 1
+PROTOCOL_VERSION: Final = 2
+# How deep PHP -> Python -> PHP -> ... callbacks may nest.
+MAX_CALLBACK_DEPTH: Final = 32
+# Module that Python code imports PyHP's own types from: `from pyhp import PhpError`.
+PUBLIC_MODULE: Final = "pyhp"
 INT64_MIN: Final = -(2**63)
 INT64_MAX: Final = 2**63 - 1
 MAX_DEPTH: Final = 256
+# Encoding uses up to 4 frames per nesting level, plus room for the caller's stack.
+RECURSION_LIMIT: Final = MAX_DEPTH * 4 + 1000
 DEFAULT_MAX_FRAME: Final = 64 * 1024 * 1024
 NAMESPACE_MODULE: Final = "__pyhp__"
 HEADER: Final = struct.Struct(">I")
+AUTH_TIMEOUT: Final = 5.0
+MAX_AUTH_FRAME: Final = 4096
 
 # PHP converts string keys that look like canonical decimal integers into int keys.
 _PHP_INT_KEY: Final = re.compile(r"^(0|-?[1-9][0-9]*)$")
@@ -60,6 +72,35 @@ class StaleReferenceError(Exception):
 
 class ProtocolError(Exception):
     """A request is malformed. This is a bug in the PHP side, not in user code."""
+
+
+class WorkerExit(BaseException):  # a control-flow signal, not an error
+    """PHP closed the connection or asked the worker to stop.
+
+    A BaseException so that it unwinds through user code and every pending
+    request (including nested callbacks) instead of being reported to PHP.
+    """
+
+
+class FatalFrameError(BaseException):
+    """A frame from PHP can't be read; the conversation can't continue."""
+
+
+class PhpError(Exception):
+    """A PHP callback threw an exception.
+
+    Python code can catch it: `from pyhp import PhpError`. If it isn't caught,
+    PHP rethrows the original PHP exception object.
+    """
+
+    def __init__(self, php_class: str, php_message: str, error_id: int) -> None:
+        super().__init__(f"{php_class}: {php_message}" if php_message else php_class)
+        self.php_class = php_class
+        self.php_message = php_message
+        self.error_id = error_id
+
+
+PhpError.__module__ = PUBLIC_MODULE
 
 
 class Registry:
@@ -97,6 +138,9 @@ def type_name(value: object) -> str:
     return f"{cls.__module__}.{cls.__qualname__}"
 
 
+_STR_ONLY: Final = frozenset({str})
+_MISSING: Final = object()
+
 # --------------------------------------------------------------------------- #
 # Python -> wire
 # --------------------------------------------------------------------------- #
@@ -104,6 +148,68 @@ def type_name(value: object) -> str:
 
 class _UnconvertibleError(Exception):
     """Internal signal: this value has to stay in Python."""
+
+
+class _EncodeState:
+    """Bookkeeping for one conversion."""
+
+    def __init__(self, registry: Registry, strict: bool) -> None:
+        self.registry = registry
+        self.strict = strict
+        self.path: set[int] = set()
+        # Whether any tagged value was produced. If not, PHP can use json_decode's
+        # result as-is instead of walking it again (saves time and a full copy).
+        self.tagged = False
+        # Ids of references created by this conversion (so a caller can undo them).
+        self.refs: list[int] = []
+        self.first_ref_type = ""
+        # Validated key sets: rows of a table repeat the same keys, and checking
+        # keys is the most expensive part of converting a dict.
+        self.key_sets: dict[tuple[object, ...], tuple[str, ...] | None] = {}
+
+    def tag(self, value: Json) -> Json:
+        self.tagged = True
+        return value
+
+    def ref(self, value: object) -> Json:
+        encoded = _ref(value, self.registry)
+        assert isinstance(encoded, dict)  # noqa: S101  # _ref always builds a dict
+        ref_id = encoded["id"]
+        assert isinstance(ref_id, int)  # noqa: S101  # ids are ints
+        self.refs.append(ref_id)
+        if not self.first_ref_type:
+            self.first_ref_type = type_name(value)
+        return self.tag(encoded)
+
+    def json_keys(self, value: dict[object, object]) -> tuple[str, ...] | None:
+        """The JSON object keys for this dict, or None if PHP can't hold its keys.
+
+        Rows of a table share one key set, so the result is cached per key set
+        (only for str/int keys, where equal keys always have equal types).
+        """
+        keys = tuple(value)
+        # Only all-str key sets are cached: a str is never equal to a key of another
+        # type, so a cache hit can't mix up e.g. 1 and True. (C-level type check.)
+        cacheable = set(map(type, keys)) <= _STR_ONLY
+        if cacheable:
+            cached = self.key_sets.get(keys, _MISSING)
+            if cached is not _MISSING:
+                return cached  # type: ignore[return-value]  # only key-set results are stored
+        seen: set[int | str] = set()
+        for key in keys:
+            php_key = _php_key(key, self.strict)
+            if php_key is None or php_key in seen:
+                if self.strict:
+                    msg = f"cannot convert dict key {key!r} to a distinct PHP array key"
+                    raise ConversionError(msg)
+                result = None
+                break
+            seen.add(php_key)
+        else:
+            result = tuple(key if type(key) is str else str(key) for key in keys)
+        if cacheable:
+            self.key_sets[keys] = result
+        return result
 
 
 def encode(value: object, registry: Registry, *, strict: bool = False) -> Json:
@@ -114,41 +220,84 @@ def encode(value: object, registry: Registry, *, strict: bool = False) -> Json:
 
     Strict mode (``to_php``): subclasses of built-ins and sets are also copied;
     anything that would need a reference raises ``ConversionError``.
+
+    Dicts become plain JSON objects, which PHP decodes straight into arrays. A
+    dict that itself has a "$t" key is wrapped ({"$t": "dict", "o": {...}}) so
+    it can't be mistaken for a tagged value.
     """
-    return _encode(value, registry, strict, 0, set())
+    return encode_value(value, registry, strict=strict)[0]
+
+
+def encode_value(value: object, registry: Registry, *, strict: bool = False) -> tuple[Json, bool]:
+    """Like ``encode``, also saying whether the result contains any tagged value."""
+    _ensure_recursion_room()
+    state = _EncodeState(registry, strict)
+    result = _encode(value, state, 0)
+    return result, state.tagged
+
+
+def _ensure_recursion_room() -> None:
+    """Make room for MAX_DEPTH levels of nesting (a few frames each).
+
+    Python 3.10 and 3.11 allow only 1000 frames by default, which a value
+    nested close to MAX_DEPTH would exceed.
+    """
+    if sys.getrecursionlimit() < RECURSION_LIMIT:
+        sys.setrecursionlimit(RECURSION_LIMIT)
 
 
 def _ref(value: object, registry: Registry) -> Json:
     return {"$t": "ref", "id": registry.add(value), "type": type_name(value)}
 
 
-def _encode(value: object, registry: Registry, strict: bool, depth: int, path: set[int]) -> Json:
+def _encode(value: object, state: _EncodeState, depth: int) -> Json:  # fast paths
+    if not state.strict:
+        # Fast paths for the exact types that make up almost all data. Anything
+        # unusual falls through to the full rules below, which decide the same way.
+        if type(value) is str:
+            if value.isascii():
+                return value
+        elif type(value) is float:
+            if value - value == 0.0:  # finite (inf - inf and nan - nan are nan)
+                return value
+        elif type(value) is int:
+            if INT64_MIN <= value <= INT64_MAX:
+                return value
+        elif value is None or type(value) is bool:
+            return value
     try:
-        scalar = _encode_scalar(value, strict)
+        scalar = _encode_scalar(value, state.strict)
     except _UnconvertibleError:
         pass
     else:
+        if isinstance(scalar, dict):  # bytes or a special float
+            state.tagged = True
         return scalar
 
-    if _is_container(value, strict):
-        if id(value) in path or depth >= MAX_DEPTH:
-            if strict:
-                reason = "a reference cycle" if id(value) in path else "nesting deeper than 256"
+    if isinstance(value, PhpCallable):
+        return state.tag({"$t": "callback", "id": value.callback_id})
+
+    if _is_container(value, state.strict):
+        if id(value) in state.path or depth >= MAX_DEPTH:
+            if state.strict:
+                reason = (
+                    "a reference cycle" if id(value) in state.path else "nesting deeper than 256"
+                )
                 msg = f"cannot convert {type_name(value)} containing {reason}"
                 raise ConversionError(msg)
-            return _ref(value, registry)
-        path.add(id(value))
+            return state.ref(value)
+        state.path.add(id(value))
         try:
-            converted = _encode_container(value, registry, strict, depth, path)
+            converted = _encode_container(value, state, depth)
         finally:
-            path.discard(id(value))
+            state.path.discard(id(value))
         if converted is not None:
             return converted
 
-    if strict:
+    if state.strict:
         msg = f"cannot convert a {type_name(value)} to a PHP value"
         raise ConversionError(msg)
-    return _ref(value, registry)
+    return state.ref(value)
 
 
 def _encode_scalar(value: object, strict: bool) -> Json:  # one flat type switch
@@ -204,25 +353,40 @@ def _is_container(value: object, strict: bool) -> bool:
     return type(value) in (list, tuple, dict)
 
 
-def _encode_container(
-    value: object, registry: Registry, strict: bool, depth: int, path: set[int]
-) -> Json:
+def _encode_container(value: object, state: _EncodeState, depth: int) -> Json:
+    """Encode a list/tuple/set/dict, or return None if PHP can't hold this dict."""
     if isinstance(value, dict):
-        pairs: list[Json] = []
-        seen_keys: set[int | str] = set()
-        for key, item in value.items():
-            php_key = _php_key(key, strict)
-            if php_key is None or php_key in seen_keys:
-                if strict:
-                    msg = f"cannot convert dict key {key!r} to a distinct PHP array key"
-                    raise ConversionError(msg)
-                return None
-            seen_keys.add(php_key)
-            pairs.append([key, _encode(item, registry, strict, depth + 1, path)])
-        return {"$t": "dict", "v": pairs}
+        # Check every key before encoding any value, so a dict that has to stay in
+        # Python doesn't leave references to its values behind in the registry.
+        json_keys = state.json_keys(value)
+        if json_keys is None:
+            return None
+        values = _encode_items(value.values(), state, depth + 1)
+        obj: dict[str, Json] = dict(zip(json_keys, values, strict=True))
+        return state.tag({"$t": "dict", "o": obj}) if "$t" in obj else obj
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [_encode(item, registry, strict, depth + 1, path) for item in value]
+        return _encode_items(value, state, depth + 1)
     return None
+
+
+def _encode_items(items: Iterable[object], state: _EncodeState, depth: int) -> list[Json]:
+    """Encode a sequence; plain scalars skip the function call (most of a table)."""
+    if state.strict:
+        return [_encode(item, state, depth) for item in items]
+    out: list[Json] = []
+    append = out.append
+    for item in items:
+        if (
+            (type(item) is float and item - item == 0.0)
+            or (type(item) is int and INT64_MIN <= item <= INT64_MAX)
+            or (type(item) is str and item.isascii())
+            or item is None
+            or type(item) is bool
+        ):
+            append(item)
+        else:
+            append(_encode(item, state, depth))
+    return out
 
 
 def _php_key(key: object, strict: bool) -> int | str | None:
@@ -243,11 +407,16 @@ def _php_key(key: object, strict: bool) -> int | str | None:
 # --------------------------------------------------------------------------- #
 
 
-def decode(data: object, registry: Registry) -> object:  # one flat tag switch
+CallbackFactory: TypeAlias = Callable[[int], object]
+
+
+def decode(  # one flat tag switch
+    data: object, registry: Registry, callbacks: CallbackFactory | None = None
+) -> object:
     if data is None or isinstance(data, (bool, int, float, str)):
         return data
     if isinstance(data, list):
-        return [decode(item, registry) for item in data]
+        return [decode(item, registry, callbacks) for item in data]
     if not isinstance(data, dict):
         msg = f"unexpected wire value of type {type_name(data)}"
         raise ConversionError(msg)
@@ -255,16 +424,23 @@ def decode(data: object, registry: Registry) -> object:  # one flat tag switch
     raw = data.get("v")
     if tag == "ref":
         return registry.get(_require_int(data.get("id"), "ref id"))
+    if tag == "callback":
+        if callbacks is None:
+            msg = "PHP callbacks can only be used inside a session"
+            raise ConversionError(msg)
+        return callbacks(_require_int(data.get("id"), "callback id"))
     if tag == "dict":
         result: dict[object, object] = {}
         for pair in _require_list(raw, "dict pairs"):
             key, item = _require_list(pair, "dict pair")
-            result[decode(key, registry)] = decode(item, registry)
+            result[decode(key, registry, callbacks)] = decode(item, registry, callbacks)
         return result
     if tag == "tuple":
-        return tuple(decode(item, registry) for item in _require_list(raw, "tuple"))
+        return tuple(decode(item, registry, callbacks) for item in _require_list(raw, "tuple"))
     if tag == "slice":
-        start, stop, step = (decode(item, registry) for item in _require_list(raw, "slice"))
+        start, stop, step = (
+            decode(item, registry, callbacks) for item in _require_list(raw, "slice")
+        )
         return slice(start, stop, step)
     if tag == "bytes":
         if not isinstance(raw, str):
@@ -304,8 +480,9 @@ Handler: TypeAlias = Callable[[Request], object]
 class _Raw:
     """Marks a handler result that is already wire-encoded."""
 
-    def __init__(self, value: Json) -> None:
+    def __init__(self, value: Json, tagged: bool) -> None:
         self.value = value
+        self.tagged = tagged
 
 
 class _Subscriptable(Protocol):
@@ -320,15 +497,58 @@ class _Iterable(Protocol):
     def __iter__(self) -> Iterator[object]: ...
 
 
+class Bridge(Protocol):
+    """The connection to PHP, as the session sees it."""
+
+    def send(self, message: Response) -> None: ...
+
+    def send_call(self, message: dict[str, object]) -> None: ...
+
+    def receive(self) -> Request | None: ...
+
+
+class PhpCallable:
+    """A PHP closure that Python code can call like a function."""
+
+    __slots__ = ("__weakref__", "_session", "callback_id")
+
+    def __init__(self, session: Session, callback_id: int) -> None:
+        self._session = session
+        self.callback_id = callback_id
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self._session.call_php(self.callback_id, args, kwargs)
+
+    def __repr__(self) -> str:
+        return f"<PHP callback #{self.callback_id}>"
+
+
+PhpCallable.__module__ = PUBLIC_MODULE
+
+
 class Session:
-    def __init__(self) -> None:
+    def __init__(self, bridge: Bridge | None = None) -> None:
         self.module = types.ModuleType(NAMESPACE_MODULE)
         # Registering the module lets pickle find functions/classes defined in the session.
         sys.modules[NAMESPACE_MODULE] = self.module
+        public = types.ModuleType(PUBLIC_MODULE)
+        public.PhpError = PhpError  # type: ignore[attr-defined]  # building a module
+        public.PhpCallable = PhpCallable  # type: ignore[attr-defined]  # building a module
+        sys.modules[PUBLIC_MODULE] = public
         self.globals: dict[str, object] = self.module.__dict__
         self.globals["__builtins__"] = builtins
         self.registry = Registry()
         self._snippets = 0
+        # PHP callbacks
+        self.bridge = bridge
+        self.callback_depth = 0
+        self._callables: weakref.WeakValueDictionary[int, PhpCallable] = (
+            weakref.WeakValueDictionary()
+        )
+        self._released_callbacks: list[int] = []
+        self._call_seq = 0
+        self._active_requests = 0
+        self._thread = threading.get_ident()
         self._handlers: dict[str, Handler] = {
             "ping": self._ping,
             "shutdown": lambda _: None,
@@ -342,6 +562,9 @@ class Session:
             "has_var": lambda r: _name(r, "name") in self.globals,
             "var_names": lambda _: [n for n in self.globals if not n.startswith("__")],
             "is_callable_global": self._is_callable_global,
+            "global_names": self._global_names,
+            "get_global": lambda r: self._as_ref(self._global_of_kind(r)),
+            "has_global": self._has_global,
             "call_global": self._call_global,
             "import": self._import,
             "getattr": lambda r: getattr(self._target(r), _name(r, "name")),
@@ -359,14 +582,18 @@ class Session:
             "repr": lambda r: repr(self._target(r)),
             "len": lambda r: len(self._sized(r)),
             "type": lambda r: type_name(self._target(r)),
-            "to_php": lambda r: _Raw(encode(self._target(r), self.registry, strict=True)),
+            "to_php": lambda r: _Raw(*encode_value(self._target(r), self.registry, strict=True)),
             "iter": lambda r: self._as_ref(iter(self._iterable(r))),
             "next_batch": self._next_batch,
+            "table": self._table,
         }
 
     # -- request dispatch ---------------------------------------------------- #
 
     def handle(self, request: Request) -> Response:
+        return self._with_releases(self._handle(request))
+
+    def _handle(self, request: Request) -> Response:
         output = io.StringIO()
         try:
             release = request.get("release", [])
@@ -378,9 +605,18 @@ class Session:
             if handler is None:
                 msg = f"unknown operation {op!r}"
                 raise ProtocolError(msg)
-            with contextlib.redirect_stdout(output):
-                result = handler(request)
-            value = result.value if isinstance(result, _Raw) else encode(result, self.registry)
+            self._active_requests += 1
+            try:
+                with contextlib.redirect_stdout(output):
+                    result = handler(request)
+            finally:
+                self._active_requests -= 1
+            if isinstance(result, _Raw):
+                value, tagged = result.value, result.tagged
+            else:
+                value, tagged = encode_value(result, self.registry)
+        except (WorkerExit, FatalFrameError):
+            raise
         except ProtocolError as error:
             return _error_response("protocol", error, output)
         except StaleReferenceError as error:
@@ -389,7 +625,111 @@ class Session:
             return _error_response("conversion", error, output)
         except BaseException as error:  # forwarded to PHP as PythonException
             return _error_response("python", error, output, with_traceback=True)
-        return {"ok": True, "value": value, "out": output.getvalue()}
+        return {"ok": True, "value": value, "tagged": tagged, "out": output.getvalue()}
+
+    # -- PHP callbacks ------------------------------------------------------- #
+
+    def call_php(
+        self, callback_id: int, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> object:
+        """Call PHP closure `callback_id` and wait for its result.
+
+        While waiting, PHP may send nested requests (the closure calling Python
+        again); they are served here, on the same thread, until PHP answers.
+        """
+        if threading.get_ident() != self._thread:
+            msg = (
+                "PHP callbacks can only be called from the thread that serves PHP's "
+                "requests, not from other threads"
+            )
+            raise RuntimeError(msg)
+        if self._active_requests == 0:
+            msg = "PHP callbacks can only be called while PHP is waiting on a call into Python"
+            raise RuntimeError(msg)
+        bridge = self.bridge
+        if bridge is None:
+            msg = "this session has no PHP connection to call back into"
+            raise RuntimeError(msg)
+        if self.callback_depth >= MAX_CALLBACK_DEPTH:
+            msg = f"PHP callbacks are nested more than {MAX_CALLBACK_DEPTH} levels deep"
+            raise RecursionError(msg)
+
+        self._call_seq += 1
+        seq = self._call_seq
+        encoded_args, args_tagged = encode_value(list(args), self.registry)
+        encoded_kwargs, kwargs_tagged = encode_value(kwargs, self.registry)
+        message: dict[str, object] = {
+            "op": "php_call",
+            "seq": seq,
+            "cb": callback_id,
+            "args": encoded_args,
+            "kwargs": encoded_kwargs,
+            "tagged": args_tagged or kwargs_tagged,
+        }
+        bridge.send_call(self._with_releases(message))
+        self.callback_depth += 1
+        try:
+            while True:
+                frame = bridge.receive()
+                if frame is None:
+                    raise WorkerExit
+                if frame.get("op") == "php_return":
+                    return self._php_result(frame, seq)
+                bridge.send(self.handle(frame))  # a nested request
+                if frame.get("op") == "shutdown":
+                    raise WorkerExit
+        finally:
+            self.callback_depth -= 1
+
+    def _php_result(self, frame: Request, seq: int) -> object:
+        if frame.get("seq") != seq:
+            msg = f"PHP answered callback call {frame.get('seq')!r} while call {seq} was waiting"
+            raise RuntimeError(msg)
+        # Decode the result before applying releases: PHP drops its proxy right
+        # after encoding it, so a returned proxy is often released in this frame.
+        value = (
+            decode(frame.get("value"), self.registry, self._callback_for)
+            if frame.get("ok") is True
+            else None
+        )
+        release = frame.get("release", [])
+        self.registry.release(
+            [_require_int(i, "release id") for i in _require_list(release, "release")]
+        )
+        if frame.get("ok") is True:
+            return value
+        error = frame.get("error")
+        if not isinstance(error, dict):
+            msg = "PHP reported a failed callback without details"
+            raise ProtocolError(msg)
+        return_id = error.get("id")
+        raise PhpError(
+            str(error.get("class", "Exception")),
+            str(error.get("message", "")),
+            return_id if isinstance(return_id, int) else seq,
+        )
+
+    def _callback_for(self, callback_id: int) -> PhpCallable:
+        """One PhpCallable per PHP closure id, released (to PHP) when Python drops it."""
+        existing = self._callables.get(callback_id)
+        if existing is not None:
+            return existing
+        # PHP is sending this id again, so a release queued for it is stale.
+        self._released_callbacks = [i for i in self._released_callbacks if i != callback_id]
+        callback = PhpCallable(self, callback_id)
+        self._callables[callback_id] = callback
+        weakref.finalize(callback, self.queue_callback_release, callback_id)
+        return callback
+
+    def queue_callback_release(self, callback_id: int) -> None:
+        self._released_callbacks.append(callback_id)
+
+    def _with_releases(self, message: dict[str, object]) -> dict[str, object]:
+        """Tell PHP which closures Python no longer needs, with the next message."""
+        if self._released_callbacks:
+            message["release_callbacks"] = self._released_callbacks
+            self._released_callbacks = []
+        return message
 
     # -- helpers -------------------------------------------------------------- #
 
@@ -403,7 +743,7 @@ class Session:
         raise NameError(msg)
 
     def _as_ref(self, value: object) -> _Raw:
-        return _Raw(_ref(value, self.registry))
+        return _Raw(_ref(value, self.registry), tagged=True)
 
     def _target(self, request: Request) -> object:
         return self.registry.get(_require_int(request.get("ref"), "ref"))
@@ -424,15 +764,19 @@ class Session:
         if key not in request:
             msg = f"missing field {key!r}"
             raise ProtocolError(msg)
-        return decode(request[key], self.registry)
+        return decode(request[key], self.registry, self._callback_for)
 
     def _call_args(self, request: Request) -> tuple[list[object], dict[str, object]]:
-        args = decode(_require_list(request.get("args", []), "args"), self.registry)
+        args = decode(
+            _require_list(request.get("args", []), "args"), self.registry, self._callback_for
+        )
         raw_kwargs = request.get("kwargs", {})
         if not isinstance(raw_kwargs, dict):
             msg = "kwargs must be an object"
             raise ProtocolError(msg)
-        kwargs = {str(k): decode(v, self.registry) for k, v in raw_kwargs.items()}
+        kwargs = {
+            str(k): decode(v, self.registry, self._callback_for) for k, v in raw_kwargs.items()
+        }
         assert isinstance(args, list)  # noqa: S101  # decode of a list is a list
         return args, kwargs
 
@@ -453,6 +797,7 @@ class Session:
             "python": sys.version.split()[0],
             "executable": sys.executable,
             "objects": len(self.registry),
+            "callbacks": len(self._callables),
         }
 
     def _exec(self, request: Request) -> object:
@@ -500,22 +845,90 @@ class Session:
 
     def _call_global(self, request: Request) -> object:
         name = _name(request, "name")
-        function = self.globals_get(name)
+        function = self._global_of_kind(request) if "kind" in request else self.globals_get(name)
         if not callable(function):
             msg = f"'{name}' is a {type_name(function)}, not a function"
             raise TypeError(msg)
         args, kwargs = self._call_args(request)
         return function(*args, **kwargs)
 
+    def _global_of_kind(self, request: Request) -> object:
+        """The global `name`, which must be of `kind`; builtins count, as in Python."""
+        name = _name(request, "name")
+        kind = _kind(request)
+        value = self.globals_get(name)
+        if not _is_kind(value, kind):
+            msg = f"'{name}' is a {type_name(value)}, not a {kind}"
+            raise TypeError(msg)
+        return value
+
+    def _has_global(self, request: Request) -> object:
+        kind = _kind(request)
+        try:
+            value = self.globals_get(_name(request, "name"))
+        except NameError:
+            return False
+        return _is_kind(value, kind)
+
+    def _global_names(self, request: Request) -> object:
+        kind = _kind(request)
+        return [
+            name
+            for name, value in self.globals.items()
+            if not name.startswith("__") and _is_kind(value, kind)
+        ]
+
     def _import(self, request: Request) -> object:
-        module = importlib.import_module(_text(request, "module"))
+        """`import m`, `import m as a`, `from p import n [as a]`, `from p import *`."""
+        name = _text(request, "module")
+        package = request.get("from")
         alias = request.get("as")
-        if alias is not None:
-            if not isinstance(alias, str) or not alias.isidentifier():
-                msg = "import alias must be a Python identifier"
+        if alias is not None and (not isinstance(alias, str) or not alias.isidentifier()):
+            msg = "import alias must be a Python identifier"
+            raise ProtocolError(msg)
+        if package is None:
+            if name == "*":
+                msg = "'*' can only be imported from a module (use from=...)"
                 raise ProtocolError(msg)
-            self.globals[alias] = module
-        return self._as_ref(module)
+            module = importlib.import_module(name)
+            if alias is not None:
+                self.globals[alias] = module
+            else:
+                # Like Python: `import os.path` binds `os`.
+                top = name.partition(".")[0]
+                self.globals[top] = sys.modules[top]
+            return self._as_ref(module)
+        if not isinstance(package, str) or package == "":
+            msg = "field 'from' must be a module name"
+            raise ProtocolError(msg)
+        source = importlib.import_module(package)
+        if name == "*":
+            if alias is not None:
+                msg = "'from ... import *' cannot have an alias"
+                raise ProtocolError(msg)
+            self._import_star(source)
+            return None
+        value = self._from_import(source, package, name)
+        self.globals[alias if alias is not None else name] = value
+        return value
+
+    def _from_import(self, source: types.ModuleType, package: str, name: str) -> object:
+        try:
+            return getattr(source, name)
+        except AttributeError:
+            pass
+        try:  # a submodule that hasn't been imported yet
+            return importlib.import_module(f"{package}.{name}")
+        except ModuleNotFoundError:
+            msg = f"cannot import name '{name}' from '{package}'"
+            raise ImportError(msg, name=package) from None
+
+    def _import_star(self, source: types.ModuleType) -> None:
+        public = getattr(source, "__all__", None)
+        if public is None:
+            public = [n for n in vars(source) if not n.startswith("_")]
+        for name in public:
+            self.globals[name] = getattr(source, name)
 
     def _setattr(self, request: Request) -> object:
         setattr(self._target(request), _name(request, "name"), self._arg(request, "value"))
@@ -555,6 +968,46 @@ class Session:
         args, kwargs = self._call_args(request)
         return method(*args, **kwargs)
 
+    def _table(self, request: Request) -> object:
+        """A pandas DataFrame as {"columns": [names], "data": [[column values], ...]}.
+
+        Made for PHP: missing values (NaN, None, NaT, pd.NA) become null, dates and
+        durations become ISO 8601 strings, and the index is left out. Cells PHP
+        can't hold (Decimal, date objects, ...) are an error naming the column,
+        never a reference per cell.
+        """
+        frame = self._target(request)
+        pandas = sys.modules.get("pandas")
+        data_frame = getattr(pandas, "DataFrame", None) if pandas is not None else None
+        if not isinstance(data_frame, type) or not isinstance(frame, data_frame):
+            msg = f"a pandas DataFrame is needed, not a {type_name(frame)}"
+            raise TypeError(msg)
+        names: list[object] = frame.columns.tolist()  # type: ignore[attr-defined]  # checked to be a DataFrame above
+        seen: set[int | str] = set()
+        for name in names:
+            php_key = _php_key(name, strict=False)
+            if php_key is None or php_key in seen:
+                msg = (
+                    f"column name {name!r} can't be a distinct PHP array key; "
+                    "rename the columns first (e.g. df.columns = [str(c) for c in df.columns])"
+                )
+                raise ConversionError(msg)
+            seen.add(php_key)
+
+        state = _EncodeState(self.registry, strict=False)
+        data: list[Json] = []
+        for position, name in enumerate(names):
+            values = _column_values(frame.iloc[:, position])  # type: ignore[attr-defined]  # a DataFrame
+            data.append(_encode_items(values, state, 2))
+            if state.refs:
+                self.registry.release(state.refs)
+                msg = (
+                    f"column {name!r} holds {state.first_ref_type} values, which have no PHP "
+                    f"equivalent; convert the column first, e.g. df[{name!r}].astype(str)"
+                )
+                raise ConversionError(msg)
+        return _Raw({"columns": names, "data": data}, state.tagged)  # type: ignore[dict-item]  # names were checked to be str/int above
+
     def _next_batch(self, request: Request) -> object:
         iterator = self._target(request)
         if not isinstance(iterator, Iterator):
@@ -567,6 +1020,44 @@ class Session:
             if len(items) >= size:
                 return {"items": items, "done": False}
         return {"items": items, "done": True}
+
+
+def _column_values(column: object) -> list[object]:
+    """A pandas Series as plain Python values, with missing values as None."""
+    kind = getattr(getattr(column, "dtype", None), "kind", None)
+    values: list[object] = column.tolist()  # type: ignore[attr-defined]  # a pandas Series
+    if kind in ("M", "m"):  # datetime64 (also with time zone) and timedelta64
+        return [None if _is_missing(v) else v.isoformat() for v in values]  # type: ignore[attr-defined]  # Timestamp/Timedelta
+    missing: list[bool] = column.isna().tolist()  # type: ignore[attr-defined]  # a pandas Series
+    if any(missing):
+        return [None if gap else value for value, gap in zip(values, missing, strict=True)]
+    return values
+
+
+def _is_missing(value: object) -> bool:
+    # NaT is not equal to itself, like NaN.
+    return value is None or value != value  # deliberate NaN/NaT check
+
+
+_KINDS: Final = ("any", "module", "class", "callable")
+
+
+def _kind(request: Request) -> str:
+    kind = request.get("kind")
+    if not isinstance(kind, str) or kind not in _KINDS:
+        msg = f"field 'kind' must be one of {', '.join(_KINDS)}"
+        raise ProtocolError(msg)
+    return kind
+
+
+def _is_kind(value: object, kind: str) -> bool:
+    if kind == "module":
+        return isinstance(value, types.ModuleType)
+    if kind == "class":
+        return isinstance(value, type)
+    if kind == "callable":
+        return callable(value)
+    return True
 
 
 def _text(request: Request, key: str) -> str:
@@ -594,6 +1085,9 @@ def _error_response(
         "message": str(error),
         "traceback": "",
     }
+    if isinstance(error, PhpError):
+        # Lets PHP rethrow the original PHP exception object.
+        details["php_error"] = error.error_id
     if with_traceback:
         # Drop the worker's own frames so the traceback starts at user code.
         tb = error.__traceback__
@@ -633,61 +1127,138 @@ def _recv_exact(sock: socket.socket, size: int) -> bytes | None:
     return bytes(data)
 
 
-def _send(sock: socket.socket, message: Response, max_frame: int) -> None:
-    body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
-    if len(body) > max_frame:
-        too_large = ProtocolError(
-            f"the response is {len(body)} bytes, above the {max_frame}-byte limit; "
-            "keep the value in Python (use a reference) or raise max_message_bytes"
-        )
-        out = message.get("out")
-        body = json.dumps(
-            _error_response(
-                "too_large", too_large, io.StringIO(out if isinstance(out, str) else "")
-            ),
-            ensure_ascii=False,
-        ).encode("utf-8")
-    sock.sendall(HEADER.pack(len(body)) + body)
+class Connection:
+    """Length-prefixed JSON frames over the socket to PHP."""
+
+    def __init__(self, sock: socket.socket, max_frame: int) -> None:
+        self.sock = sock
+        self.max_frame = max_frame
+
+    def send(self, message: Response) -> None:
+        """Send a response; one that is too large is replaced by an error response."""
+        body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        if len(body) > self.max_frame:
+            too_large = ProtocolError(
+                f"the response is {len(body)} bytes, above the {self.max_frame}-byte limit; "
+                "keep the value in Python (use a reference) or raise max_message_bytes"
+            )
+            out = message.get("out")
+            body = json.dumps(
+                _error_response(
+                    "too_large", too_large, io.StringIO(out if isinstance(out, str) else "")
+                ),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        self.sock.sendall(HEADER.pack(len(body)) + body)
+
+    def send_call(self, message: dict[str, object]) -> None:
+        """Send a callback call; one that is too large raises ConversionError."""
+        body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        if len(body) > self.max_frame:
+            msg = (
+                f"the arguments of a PHP callback are {len(body)} bytes, above the "
+                f"{self.max_frame}-byte limit; pass a reference instead"
+            )
+            raise ConversionError(msg)
+        self.sock.sendall(HEADER.pack(len(body)) + body)
+
+    def receive(self) -> Request | None:
+        """The next frame from PHP, or None when PHP closed the connection."""
+        header = _recv_exact(self.sock, HEADER.size)
+        if header is None:
+            return None
+        (length,) = HEADER.unpack(header)
+        if length > self.max_frame:
+            msg = f"request of {length} bytes exceeds the limit"
+            raise FatalFrameError(msg)
+        body = _recv_exact(self.sock, length)
+        if body is None:
+            return None
+        try:
+            request = json.loads(body)
+        except ValueError:
+            msg = "request is not valid JSON"
+            raise FatalFrameError(msg) from None
+        if not isinstance(request, dict):
+            msg = "request is not a JSON object"
+            raise FatalFrameError(msg)
+        return request
 
 
 def serve(sock: socket.socket, token: str, max_frame: int) -> int:
-    session = Session()
-    _send(
-        sock,
+    connection = Connection(sock, max_frame)
+    session = Session(bridge=connection)
+    connection.send(
         {
             "op": "hello",
             "token": token,
             "protocol": PROTOCOL_VERSION,
             "python": sys.version.split()[0],
             "pid": os.getpid(),
-        },
-        max_frame,
+        }
     )
-    while True:
-        header = _recv_exact(sock, HEADER.size)
+    try:
+        while True:
+            request = connection.receive()
+            if request is None:
+                return 0
+            connection.send(session.handle(request))
+            if request.get("op") == "shutdown":
+                return 0
+    except WorkerExit:
+        return 0
+    except FatalFrameError as error:
+        sys.stderr.write(f"pyhp: {error}, stopping\n")
+        return 2
+
+
+def _authenticated(conn: socket.socket, token: str, timeout: float) -> bool:
+    """The first frame on a new connection must be {"op": "auth", "token": <token>}."""
+    conn.settimeout(max(0.01, min(timeout, AUTH_TIMEOUT)))
+    try:
+        header = _recv_exact(conn, HEADER.size)
         if header is None:
-            return 0
+            return False
         (length,) = HEADER.unpack(header)
-        if length > max_frame:
-            sys.stderr.write(f"pyhp: request of {length} bytes exceeds the limit, stopping\n")
-            return 2
-        body = _recv_exact(sock, length)
+        if length > MAX_AUTH_FRAME:
+            return False
+        body = _recv_exact(conn, length)
         if body is None:
-            return 0
-        request = json.loads(body)
-        if not isinstance(request, dict):
-            sys.stderr.write("pyhp: request is not a JSON object, stopping\n")
-            return 2
-        response = session.handle(request)
-        _send(sock, response, max_frame)
-        if request.get("op") == "shutdown":
-            return 0
+            return False
+        message = json.loads(body)
+    except (OSError, ValueError):  # timeouts, resets, invalid JSON or UTF-8
+        return False
+    offered = message.get("token") if isinstance(message, dict) else None
+    return (
+        isinstance(message, dict)
+        and message.get("op") == "auth"
+        and isinstance(offered, str)
+        and hmac.compare_digest(offered.encode(), token.encode())
+    )
+
+
+def _accept_php(server: socket.socket, token: str, deadline: float) -> socket.socket | None:
+    """Wait for PHP to connect and authenticate. Other connections are dropped."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        server.settimeout(remaining)
+        try:
+            conn, _ = server.accept()
+        except TimeoutError:
+            return None
+        if _authenticated(conn, token, remaining):
+            conn.settimeout(None)
+            return conn
+        conn.close()
 
 
 def main() -> int:
-    port = int(os.environ.pop("PYHP_PORT"))
+    port_file = os.environ.pop("PYHP_PORT_FILE")
     token = os.environ.pop("PYHP_TOKEN")
     max_frame = int(os.environ.pop("PYHP_MAX_FRAME", str(DEFAULT_MAX_FRAME)))
+    startup_timeout = float(os.environ.pop("PYHP_STARTUP_TIMEOUT", "10"))
     extra_paths = os.environ.pop("PYHP_PATHS", "")
     # Like `python -c`: the working directory comes first on sys.path,
     # instead of the directory that contains this worker script.
@@ -695,7 +1266,19 @@ def main() -> int:
     for path in reversed([p for p in extra_paths.split(os.pathsep) if p]):
         sys.path.insert(1, path)
     _isolate_stdio()
-    with socket.create_connection(("127.0.0.1", port)) as sock:
+
+    # The worker listens and PHP connects, not the other way round: on Windows,
+    # PHP waits 500 ms whenever it closes a listening socket.
+    with socket.create_server(("127.0.0.1", 0)) as server:
+        port = server.getsockname()[1]
+        # The trailing newline tells PHP the number is complete.
+        with open(port_file, "w", encoding="ascii") as handle:
+            handle.write(f"{port}\n")
+        sock = _accept_php(server, token, time.monotonic() + startup_timeout)
+    if sock is None:
+        sys.stderr.write("pyhp: PHP did not connect within the start-up timeout, stopping\n")
+        return 3
+    with sock:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         return serve(sock, token, max_frame)
 

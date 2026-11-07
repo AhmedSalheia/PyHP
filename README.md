@@ -15,7 +15,7 @@ $totals = $big->groupby('region')['revenue']->sum()->sort_values(ascending: fals
 print_r($totals->to_dict());                                // ['west' => 306861.5, ...]
 ```
 
-> **Status: MVP (0.x, unreleased).** The design works and is tested on Linux with real pandas and NumPy. Windows is the main target but **has not been run yet** (see [Platform support](#platform-support)). APIs may still change, and the import API is still [open for discussion](#imports-provisional).
+> **Status: MVP (0.x, unreleased).** Tested on Linux and Windows with real pandas and NumPy (see [Platform support](#platform-support)). APIs may still change before the first release.
 
 ---
 
@@ -29,19 +29,21 @@ print_r($totals->to_dict());                                // ['west' => 306861
 6. [API reference](#api-reference)
 7. [How values are converted](#how-values-are-converted)
 8. [pandas and NumPy in practice](#pandas-and-numpy-in-practice)
-9. [Printed output and the log](#printed-output-and-the-log)
-10. [Errors](#errors)
-11. [Object lifetime and memory](#object-lifetime-and-memory)
-12. [Performance](#performance)
-13. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
-14. [Security](#security)
-15. [Platform support](#platform-support)
-16. [Imports (provisional)](#imports-provisional)
-17. [Every limitation in one list](#every-limitation-in-one-list)
-18. [How it works inside](#how-it-works-inside)
-19. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
-20. [Development](#development)
-21. [Roadmap](#roadmap)
+9. [PHP callbacks](#php-callbacks)
+10. [SymPy and spaCy in practice](#sympy-and-spacy-in-practice)
+11. [Printed output and the log](#printed-output-and-the-log)
+12. [Errors](#errors)
+13. [Object lifetime and memory](#object-lifetime-and-memory)
+14. [Performance](#performance)
+15. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
+16. [Security](#security)
+17. [Platform support](#platform-support)
+18. [Imports](#imports)
+19. [Every limitation in one list](#every-limitation-in-one-list)
+20. [How it works inside](#how-it-works-inside)
+21. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
+22. [Development](#development)
+23. [Roadmap](#roadmap)
 
 ---
 
@@ -75,9 +77,13 @@ That design makes some things easy and some things impossible, and it's worth kn
 
 ## Installation
 
-PyHP isn't on Packagist yet. Until then, install it from a local folder.
+**1. Install the package:**
 
-**1. Put the PyHP folder next to your project** (or anywhere), then in your project's `composer.json`:
+```bat
+composer require ahmedsalheia/pyhp
+```
+
+To work on a local copy instead (for example to try changes to PyHP itself), add it as a path repository in your project's `composer.json`:
 
 ```json
 {
@@ -88,10 +94,6 @@ PyHP isn't on Packagist yet. Until then, install it from a local folder.
         "ahmedsalheia/pyhp": "*@dev"
     }
 }
-```
-
-```bat
-composer update ahmedsalheia/pyhp
 ```
 
 **2. Create a virtual environment for your Python libraries** (recommended, so your project's Python packages are isolated):
@@ -153,9 +155,12 @@ More complete, runnable examples are in [`examples/`](examples):
 | File | Shows |
 |---|---|
 | `01_basics.php` | exec, eval, printed output, catching Python errors |
-| `02_vars_and_functions.php` | `execFile`, sharing variables, keyword arguments, Python classes as proxies |
+| `02_vars_and_functions.php` | `execFile`, sharing variables, keyword arguments, `classes`, Python objects as proxies |
 | `03_pandas_report.php` | a full pandas report written in PHP syntax |
 | `04_numpy.php` | NumPy arrays, tuple indexes, slices, scalars |
+| `05_callbacks.php` | PHP closures called from Python: `sorted(key=...)`, pandas `apply`, exceptions |
+| `06_sympy.php` | SymPy: solving, calculus, LaTeX, exact values, `lambdify`, matrices |
+| `07_spacy_nlp.php` | spaCy: entities, sentences, lemmas, the Matcher, `nlp.pipe`, a PHP pipeline component, displaCy HTML |
 
 Run them with your interpreter:
 
@@ -223,7 +228,7 @@ When the last PHP reference to a proxy disappears, the Python object is released
 | `Py::session(array $overrides = []): Session` | A new independent session. `$overrides` apply to this session only. |
 | `Py::default(): Session` | A shared default session, started on first use and restarted automatically if it was closed. |
 | `Py::reset(bool $forgetConfig = false)` | Close the default session. With `forgetConfig: true` also go back to default options. |
-| `Py::exec()`, `Py::execFile()`, `Py::eval()`, `Py::import()`, `Py::vars()`, `Py::functions()` | Shortcuts to the same methods on `Py::default()`. |
+| `Py::exec()`, `Py::execFile()`, `Py::eval()`, `Py::import()`, `Py::vars()`, `Py::functions()`, `Py::modules()`, `Py::classes()` | Shortcuts to the same methods on `Py::default()`. |
 | `Py::tuple(...$items)` | A value sent as a Python `tuple`. |
 | `Py::slice($start, $stop = null, $step = null)` | A value sent as a Python `slice`: `Py::slice(1, 3)` is `1:3`, `Py::slice(null, null, -1)` is `::-1`. |
 | `Py::dict(array $items)` | A value sent as a Python `dict`, even if the array is empty or list-shaped. |
@@ -231,6 +236,8 @@ When the last PHP reference to a proxy disappears, the Python object is released
 | `Py::repr(PyObject $o): string` | Python `repr(o)`. |
 | `Py::type(PyObject $o): string` | The Python type, e.g. `pandas.DataFrame`, `int`, `__pyhp__.Invoice`. |
 | `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets and subclasses of dict/list/str/int/float. Throws instead of returning nested proxies. |
+| `Py::rows(PyObject $df): array` | A pandas DataFrame as a list of rows, fast and `json_encode()`-ready; see [Copying tables into PHP](#copying-tables-into-php). |
+| `Py::columns(PyObject $df): array` | The same as one list per column: the most compact copy. |
 
 > `Py::config()` does **not** change a default session that is already running. Call `Py::reset()` after changing options if you want the default session to pick them up.
 
@@ -263,12 +270,14 @@ You can also build a `Config` directly with named arguments: `new Session(new Co
 | `exec(string $code): void` | Run Python statements in the session namespace. |
 | `execFile(string $path): void` | Run a `.py` file **in the session namespace**: what it defines becomes available through `vars` and `functions`. Relative paths are resolved from PHP's current directory. |
 | `eval(string $expression): mixed` | Evaluate one expression and return its value. |
-| `import(string $module, ?string $as = null): PyObject` | Import a module and return a proxy. With `$as`, also bind it to that name in the namespace (like `import pandas as pd`). |
+| `import(string $module, ?string $as = null, ?string $from = null): mixed` | Import like Python and bind the name in the session; see [Imports](#imports). |
+| `$modules` | Modules bound in the session (see below). |
+| `$classes` | Python classes, to create instances (see below). |
 | `$vars` | Global variables (see below). |
 | `$functions` | Global callables (see below). |
 | `takeOutput(): string` | In capture mode, the text printed since the last call to `takeOutput()`; then clears it. |
 | `log(): string` | Everything the worker wrote to stderr so far (warnings, crash output). |
-| `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `pid`. |
+| `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `callbacks` (PHP closures Python holds), `pid`. |
 | `isOpen(): bool` | Whether the worker is running. |
 | `close(): void` | Stop the worker. Safe to call twice. Also happens automatically when the session object is destroyed. |
 | `config(): Config` | The session's configuration. |
@@ -308,7 +317,7 @@ $py->vars->{'odd name'};        // any string works as a name
 ```php
 $py->functions->greet('Ahmed');                  // greet('Ahmed')
 $py->functions->greet('Ahmed', excited: true);   // greet('Ahmed', excited=True)
-$py->functions->Invoice('Ahmed');                // classes are callables: returns a proxy
+$py->functions->Invoice('Ahmed');                // classes are callables too (prefer $py->classes)
 $py->functions->len([1, 2, 3]);                  // builtins work: 3
 $fn = $py->functions->greet;                     // a callable proxy for later: $fn('Sam')
 isset($py->functions->greet);                    // exists and is callable?
@@ -317,7 +326,37 @@ isset($py->functions->greet);                    // exists and is callable?
 * PHP **named arguments become Python keyword arguments**. Positional arguments must come before named ones, which PHP enforces anyway.
 * You can also spread an array: `$py->functions->f(...['a' => 1, 'b' => 2])`. String keys become keyword arguments, so keys don't even need to be valid PHP identifiers.
 * `functions` has no ordinary PHP methods, so every Python name is reachable, whatever it's called.
-* `classes`, a dedicated namespace for Python classes, is a planned addition. Today, use `functions->ClassName(...)` to instantiate.
+* `functions` accepts anything callable, classes included. Use `classes` when you mean "create an instance": it refuses non-classes, which catches mistakes.
+
+### `classes`: Python classes
+
+```php
+$py->exec('class Invoice: ...');                 // or import one: $py->import('Decimal', from: 'decimal')
+$invoice = $py->classes->Invoice('Ahmed', currency: 'ILS');   // Invoice('Ahmed', currency='ILS') → proxy
+$py->classes->dict(a: 1);                        // builtin classes work: ['a' => 1]
+$cls = $py->classes->Invoice;                    // the class itself, as a proxy: $cls('Sam'), $cls->__name__
+isset($py->classes->Invoice);                    // is "Invoice" a class?
+$py->classes->names();                           // ['Invoice', ...] — your own and imported classes, not builtins
+```
+
+* Calling or fetching a name that isn't a class throws `PythonException` (`TypeError: 'make' is a function, not a class`), or `NameError` if the name doesn't exist.
+* Static methods and class attributes go through the class proxy: `$py->classes->Invoice->from_dict([...])`.
+* `$py->classes->X = ...` throws `LogicException`: define classes with `exec()`/`execFile()` or import them.
+* `names()` is a PHP method. A Python class called `names` is still reachable as `$py->classes->names` (no parentheses) or `$py->classes->__call('names', [...])`.
+
+### `modules`: imported modules
+
+```php
+$py->import('pandas', as: 'pd');
+$py->exec('import json');
+$py->modules->names();                           // ['pd', 'json'] — every name bound to a module
+$py->modules->pd->read_csv('sales.csv');         // the module bound as "pd"
+isset($py->modules->json);                       // is "json" bound to a module?
+```
+
+* The container shows the session namespace as it is: modules added with `import()` **and** modules imported inside `exec()`/`execFile()` code, under the names they're bound to (aliases included).
+* Reading a name that isn't bound to a module throws `PythonException` (`TypeError` or `NameError`). Nothing is imported implicitly: use `$py->import()` to add modules.
+* `$py->modules->x = ...` throws `LogicException`.
 
 ### `PyObject`: the proxy
 
@@ -376,7 +415,8 @@ Things that look like they should work but behave differently:
 | `Py::tuple(...)` | `tuple` | |
 | `Py::slice(...)` | `slice` | |
 | `Py::dict([...])` | `dict` | Even when list-shaped. |
-| `Closure` / callable | ✗ `ConversionException` | Callbacks from Python into PHP aren't supported yet. |
+| `Closure` (also `strlen(...)` first-class callables) | a callable `pyhp.PhpCallable` | See [PHP callbacks](#php-callbacks). It comes back to PHP as the same `Closure`. |
+| callable strings and arrays (`'strlen'`, `[$obj, 'method']`) | `str` / `list` | **Never** treated as callables: data stays data. Wrap them: `strlen(...)`, `$obj->method(...)`. |
 | any other object (`DateTime`, enums, your classes) | ✗ `ConversionException` | Convert first: `$date->format('c')`, `$enum->value`, `(array) $dto`. |
 | resource | ✗ `ConversionException` | |
 | arrays nested deeper than 256 levels | ✗ `ConversionException` | |
@@ -427,7 +467,7 @@ $row['when']->isoformat();    // "2024-01-02"
 ### The pattern
 
 1. **Load and transform inside Python**, through proxies or `exec()`.
-2. **Copy only the small result** to PHP: `->to_dict()`, `->tolist()`, `->item()`, or a scalar like `->sum()`.
+2. **Copy only the result** to PHP: `->to_dict()`, `->tolist()`, `->item()`, a scalar like `->sum()`, or a whole table with [`Py::rows($df)`](#copying-tables-into-php).
 3. **Or don't copy at all**: write a file from Python (`->to_csv()`, `->to_parquet()`) and pass the path around.
 
 ```php
@@ -462,7 +502,7 @@ $rows = $summary->reset_index()->to_dict('records');               // small → 
 | `np.linalg.det(m)` | `$np->linalg->det($m)` |
 | `len(df)` | `Py::len($df)` |
 | `print(df)` | `echo $df;` |
-| `lambda x: x * 2` | not possible from PHP. Define it in Python: `$py->exec('double = lambda x: x * 2')`, then pass `$py->functions->double` |
+| `lambda x: x * 2` | a PHP closure: `fn ($x) => $x * 2` (see [PHP callbacks](#php-callbacks)), or a Python lambda via `exec()` when speed matters |
 
 When a chain gets long or needs lambdas, write that part in Python. Both styles share the same objects:
 
@@ -471,11 +511,163 @@ $py->vars->orders = $df;                        // hand a proxy to Python
 $result = $py->eval("orders.assign(net=lambda d: d.revenue * 0.84).nlargest(5, 'net')");
 ```
 
+### Copying tables into PHP
+
+`Py::rows()` and `Py::columns()` are the fast, PHP-friendly way to copy a whole DataFrame:
+
+```php
+$rows = Py::rows($df);        // [['id' => 1, 'price' => 9.5, 'when' => '2024-01-02T03:04:05'], ...]
+$cols = Py::columns($df);     // ['id' => [1, 2, ...], 'price' => [9.5, null, ...], ...]
+echo json_encode($rows);      // works: no NAN, no proxies
+```
+
+They differ from `to_dict()` on purpose, to give you data PHP can use directly:
+
+| In the DataFrame | `to_dict()` gives | `Py::rows()` / `Py::columns()` give |
+|---|---|---|
+| `NaN`, `None`, `pd.NA`, `NaT` | `NAN` / `null` / proxies | `null` |
+| datetime (`datetime64`, with or without time zone) | `Timestamp` proxies | ISO 8601 string, e.g. `2024-01-02T03:04:05+02:00` |
+| timedelta | `Timedelta` proxies | ISO 8601 duration, e.g. `P0DT0H1M30S` |
+| categorical | values | values |
+| `±inf` | `INF` / `-INF` | `INF` / `-INF` (still not valid JSON) |
+| the index | included with `orient='index'` etc. | **left out**; call `->reset_index()` first to keep it |
+| `Decimal`, `date`, other objects | proxies, one per cell | `ConversionException` naming the column; convert it first, e.g. `$df['amount'] = $df['amount']->astype('float')` |
+
+* Column names must be strings or integers that stay distinct as PHP array keys (`'1'` and `1` collide in PHP); otherwise you get a `ConversionException`. Rename first, e.g. flatten a MultiIndex.
+* A `Series` isn't accepted: use `$series->tolist()` or `Py::rows($series->to_frame())`.
+* Floats are exact (no rounding), unlike pandas' own `to_json()`.
+
 ### Missing values and dates
 
 * `numpy.nan` and float NaN → PHP `NAN`. Test with `is_nan()`, not `=== NAN`.
 * `pd.NA`, `pd.NaT`, `Timestamp`, `datetime`, `date`, `Decimal`, NumPy `datetime64` → **proxies**. Call `->isoformat()`, `->timestamp()`, `->year`, `str(...)` on them, or format in pandas before copying: `$df['date']->dt->strftime('%Y-%m-%d')->tolist()`.
 * `to_dict()` on a frame with NaN gives `NAN` floats inside the PHP array. `json_encode()` refuses `NAN`, so replace them first (`$df->fillna(...)` or `$df->astype('object')->where($df->notna(), null)`).
+
+---
+
+## PHP callbacks
+
+PHP closures can be passed to Python wherever Python expects a function. Python calls them, PHP runs them, and Python carries on with the result:
+
+```php
+$sorted = $py->functions->sorted($people, key: fn (array $p) => $p['age']);
+
+$names = $pd->Series(['ahmed', 'sam']);
+$names->apply(ucfirst(...))->tolist();                 // ['Ahmed', 'Sam']
+
+$py->vars->scale = fn (float $x, float $by = 1.0) => $x * $by;
+$py->eval('scale(2.0, by=1.5)');                       // 3.0: keyword arguments become named arguments
+
+$py->modules->scipy->optimize->minimize(fn ($x) => cost($x), x0: [1, 2]);   // any library that takes a function
+```
+
+### What gets passed
+
+* **Only `Closure` objects** become Python callables: `fn () => ...`, `function () {...}`, and first-class callables like `strlen(...)` or `$obj->method(...)`. Strings and arrays are never treated as callables, even if PHP's `is_callable()` would accept them, so a string like `"system"` in your data can never become something Python can call.
+* **Arguments** follow the usual [conversion rules](#how-values-are-converted): plain data is copied, everything else arrives as a `PyObject` proxy. Python keyword arguments arrive as PHP named arguments.
+* **The return value** is converted back the same way (arrays, scalars, proxies, `Py::tuple()`, ...).
+* **The same closure** passed twice is the same Python object, and a closure Python hands back arrives in PHP as the original `Closure`.
+
+### Callbacks that call Python
+
+A callback can use the session freely: read `vars`, call `functions`, create proxies. Python serves those calls while it waits for the callback, so these nest:
+
+```php
+$py->exec('def through(f, n): return f(n) + 1');
+$inner = fn (int $n) => $py->vars->base + $n;                    // PHP → Python, inside a callback
+$outer = fn (int $n) => $py->functions->through($inner, $n * 2); // and another level
+$py->functions->through($outer, 1);
+```
+
+Nesting is limited to **32 levels** (PHP → Python → PHP → ...); deeper raises `RecursionError` in Python, which reaches PHP as `PythonException`.
+
+### Exceptions
+
+* If a callback throws and Python **doesn't** catch it, PHP rethrows **the original exception object**, so `catch (YourDomainException $e)` keeps working through Python:
+
+  ```php
+  try {
+      $py->functions->process($rows, fn ($row) => throw new InvalidRow($row));
+  } catch (InvalidRow $e) {        // the exact object the callback threw
+  }
+  ```
+
+* Python code can catch it as `PhpError` (with `php_class` and `php_message`):
+
+  ```python
+  from pyhp import PhpError
+
+  try:
+      callback(row)
+  except PhpError as e:
+      print(e.php_class, e.php_message)
+  ```
+
+* A return value PHP can't send (e.g. a `DateTime`) fails like an exception thrown inside the callback.
+
+### Timeouts, threads and lifetime
+
+* **Time spent running PHP callbacks doesn't count against `timeout`.** The timeout exists to stop Python that hangs; a slow PHP closure isn't that. (Python's own time still counts, and nested calls have their own timeout.)
+* **Callbacks must be called from the thread that serves PHP's requests, while PHP is waiting on a call.** A callback called from another Python thread (`threading`, `ThreadPoolExecutor`, some ML libraries' background threads) raises `RuntimeError` in that thread. A callback stored in Python and called during a *later* call works fine.
+* PHP keeps a closure alive while Python holds it, and lets it go when Python drops it. `$py->info()['callbacks']` shows how many Python holds.
+* Closing the session inside a callback ends the outer call with `SessionClosedException` (or with the exception the callback threw).
+
+### Speed: prefer one callback per column, not per row
+
+Each callback is one round trip (~65 µs on Linux), the same as any other call. Fine for an optimizer objective called 200 times; slow for a million rows:
+
+| | 10,000 values |
+|---|---|
+| `$series->apply(fn ($x) => $x * 2)`: one callback per value | ~665 ms |
+| `$series->pipe(fn (PyObject $s) => $s->mul(2))`: one callback, pandas does the loop | ~0.7 ms |
+
+`pipe()` passes the whole Series (as a proxy) to your closure once, and you use pandas methods on it. When you need per-value logic on big data, write that function in Python instead.
+
+---
+
+## SymPy and spaCy in practice
+
+Any library works the same way: import it, call it through proxies, copy plain results into PHP. These two show the typical gotchas. Both are tested in CI (on Linux) by `tests/php/SympyTest.php` and `tests/php/SpacyTest.php`, which skip when the library isn't installed.
+
+### SymPy (symbolic math)
+
+```php
+$sp = $py->import('sympy', as: 'sp');
+$x = $sp->symbols('x');
+
+$sp->solve($sp->sympify('x**2 - 5*x + 6'), $x);         // [proxy 2, proxy 3]
+(string) $sp->diff($sp->sympify('x**3'), $x);            // '3*x**2'
+$sp->latex($sp->Integral($sp->sqrt($x), $x));            // '\int \sqrt{x}\, dx'
+$f = $sp->lambdify($x, $sp->sympify('x**2 + 1'));
+$f(3);                                                   // 10
+```
+
+* **SymPy numbers are proxies**, not PHP numbers: `Integer`, `Rational` and `Float` are SymPy classes, not Python `int`/`float`. Convert with `$py->functions->int($n)`, `$py->functions->float($n)` or `(string) $n` (exact: `'5/4'`).
+* Build expressions from strings with `sympify()`, or use method forms: there are no operators on proxies, so `x**2` is `$x->__pow__(2)`.
+* `solve()` for a system returns a dict keyed by `Symbol`s. Those can't be PHP array keys, so the dict stays a proxy; convert in Python: `$py->eval("{str(k): v for k, v in ...}")`.
+* `lambdify()` returns a plain Python function: call it from PHP like a closure.
+* Big symbolic computations can take seconds; raise `timeout` if needed.
+
+### spaCy (natural language processing)
+
+```php
+$spacy = $py->import('spacy');
+$nlp = $spacy->load('en_core_web_sm');                  // python -m spacy download en_core_web_sm
+$doc = $nlp('Tim Cook visited Ramallah on Monday.');
+
+foreach ($doc->ents as $e) { echo $e->text, ' ', $e->label_; }   // Tim Cook PERSON, Ramallah GPE, ...
+$tokens = $doc->to_json()['tokens'];                    // every token, one round trip
+```
+
+* **Load the model once** and reuse `$nlp`: `import spacy` takes ~0.5 s and loading the small model ~0.3 s; each `$nlp($text)` is then ~10 ms. Under PHP-FPM every request pays the load, so use spaCy from CLI scripts, queue workers or long-running PHP.
+* **Iterating tokens costs one round trip per attribute read.** For whole documents use `$doc->to_json()` (text, entities, sentences and every token's lemma/POS/tag/dep as plain arrays) or compute what you need in Python with `eval()`.
+* `spacy.blank('en')` gives a tokenizer without downloading a model.
+* Matcher patterns are plain PHP arrays: `[[['LIKE_NUM' => true], ['LOWER' => 'billion']]]`. Match ids are 64-bit unsigned hashes, larger than PHP ints, so they arrive as proxies; pass `as_spans: true` to get spans with `->label_` instead.
+* `$nlp->pipe($texts)` processes many texts in batches; iterate it lazily from PHP.
+* A PHP closure can be a pipeline component (register it with `Language.component(...)` in `exec`, then `$nlp->add_pipe(...)`). To store results on the doc, use a custom extension and write `$doc->_->name = ...`: `$doc->user_data` is a plain dict, so PHP gets a **copy** and `$doc->user_data['k'] = ...` changes nothing in Python.
+* `$spacy->displacy->render($doc, style: 'ent')` returns HTML you can put straight into a page.
+
+Other NLP libraries (NLTK, Hugging Face `transformers`, `sentence-transformers`, `langdetect`, …) follow the same pattern; the main thing to watch is load time, so keep one session alive and load models once.
 
 ---
 
@@ -507,7 +699,8 @@ Everything PyHP throws extends `PyHP\Exception\PyHPException`.
 | Exception | When | Session afterwards |
 |---|---|---|
 | `PythonException` | Your Python code raised. Has `pythonType` (`"ValueError"`), `pythonMessage`, and `pythonTraceback` (the full Python traceback, starting at your code). `getMessage()` is `"ValueError: message"`. | ✅ still usable |
-| `ConversionException` | A value can't cross the boundary (PHP closure, `DateTime`, proxy from another session, strict `toPhp()` failure). | ✅ still usable |
+| `ConversionException` | A value can't cross the boundary (`DateTime`, other objects, proxy from another session, strict `toPhp()` failure). | ✅ still usable |
+| *your own exception* | A [PHP callback](#php-callbacks) threw and Python didn't catch it: the original object is rethrown. | ✅ still usable |
 | `MessageTooLargeException` | A request or result is bigger than `max_message_bytes`. | ✅ still usable |
 | `ConfigException` | Invalid option (unknown key, wrong type, bad value). | n/a: thrown before starting |
 | `WorkerStartException` | Python couldn't be started: interpreter not found, crashed during start-up (e.g. Python < 3.10), didn't connect within `startup_timeout`. The message includes the exit code and the worker log. | n/a: never started |
@@ -553,26 +746,36 @@ try {
 
 ## Performance
 
-Measured on the Linux test machine (2 vCPU, PHP 8.3, Python 3.13, pandas 3.0). **Windows numbers will differ and have not been measured.** Process start-up in particular is usually slower on Windows.
+Measured with [`benchmarks/overhead.php`](benchmarks/overhead.php). Run it yourself, without Xdebug coverage: `php benchmarks/overhead.php path\to\python.exe`.
 
-| Operation | Time |
-|---|---|
-| Start a session (no imports) | ~37 ms |
-| One round trip (`eval('1')`, attribute read, method call) | ~70–100 µs |
-| `import pandas` (first time in a session) | ~210 ms |
-| `groupby().mean().to_dict()` on 1,000,000 rows via 4 proxy calls | ~17 ms |
-| …the same as one `eval()` | ~10 ms |
-| Copy 100,000 rows to PHP with `to_dict('records')` | ~900 ms |
-| `close()` with pandas loaded | ~70 ms |
+| Operation | Linux (PHP 8.3, Python 3.13, 2 vCPU) | Windows (PHP 8.4, Python 3.11 venv) |
+|---|---|---|
+| Start a session (no imports) | ~36 ms | ~175 ms (Python alone needs ~120 ms there) |
+| One round trip (`eval('1')`) | ~74 µs | ~87 µs |
+| Attribute read on a proxy | ~63 µs | ~76 µs |
+| `import pandas` (first time in a session) | ~190 ms | ~330 ms |
+| 1,000,000-row `groupby().mean().to_dict()` via 4 proxy calls | ~16 ms | ~16 ms |
+| …the same as one `eval()` | ~9 ms | ~13 ms |
+| `close()` with pandas loaded | ~72 ms | ~73 ms |
+
+Copying a 100,000-row × 4-column DataFrame into PHP (Linux):
+
+| Method | Time | PHP memory peak | PHP result |
+|---|---|---|---|
+| `$df->to_dict('records')` | ~610 ms | ~60 MB | list of rows, 53 MB |
+| [`Py::rows($df)`](#copying-tables-into-php) | ~240 ms | ~49 MB | list of rows, 41 MB |
+| [`Py::columns($df)`](#copying-tables-into-php) | ~180 ms | ~16 MB | one list per column, 11 MB |
 
 What that means:
 
-* **Per-call overhead is negligible for DataFrame-level work.** Calling pandas through 4 proxies instead of one Python expression cost ~7 ms on a 1M-row groupby.
+* **Per-call overhead is negligible for DataFrame-level work.** Going through 4 proxies instead of one Python expression costs a few milliseconds on a 1M-row groupby.
 * **Per-call overhead dominates chatty code.** 10,000 attribute reads ≈ 1 s. Don't loop over rows from PHP; let pandas/NumPy do it, or write the loop in Python.
-* **Copying is the expensive part.** Data goes through JSON. Copy summaries, not datasets. For large outputs, write a file from Python.
-* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call.
+* **Copying is the expensive part, in time and in memory.** Data travels as JSON, and PHP arrays are much bigger than a DataFrame. Use `Py::rows()`/`Py::columns()` for tables (2.5–3.5× faster than `to_dict('records')`; columns need a quarter of the memory), copy summaries rather than datasets, and for very large outputs write a file from Python (`to_csv`, `to_parquet`). PHP's default `memory_limit` of 128 MB (Windows `php.ini`) holds roughly 250k rows × 4 columns as rows, or over 1M as columns.
+* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call. Python itself starts more slowly on Windows (~120 ms on the test machine vs ~13 ms on Linux).
 
 The per-call figure is in line with other process-based bridges. In-process embedding (swoole/phpy) is far faster per call; see [the comparison](#pyhp-vs-swoolephpy).
+
+**Why not Apache Arrow/Parquet for transfers?** Reading Arrow in PHP needs a compiled extension or a slow pure-PHP reader, which would break PyHP's "just `composer require`" promise. Column-wise JSON plus a faster conversion walk gets most of the gain with nothing extra to install. If you need Arrow/Parquet, write the file from Python (`$df->to_parquet($path)`) and read it with your own tools.
 
 ---
 
@@ -603,7 +806,7 @@ The per-call figure is in line with other process-based bridges. In-process embe
   $py->functions->process($_GET['name']);
   ```
 
-* The worker listens on nothing. PHP opens a socket on `127.0.0.1` with a random port, the worker connects to it, and the server socket is closed right after. The worker must present a random 128-bit token, so another local process can't take its place. Local processes running as **your own user** could still inspect the worker (environment variables, memory), as with any process.
+* The worker listens on `127.0.0.1` only (never on the network), on a random port, and only until PHP has connected; then it closes the listener. The first message on a connection must contain a random 128-bit token that only the PHP process that started the worker knows. Any other connection is dropped without a reply, and a worker that nobody connects to within `startup_timeout` exits. Local processes running as **your own user** could still inspect the worker (environment variables, memory), as with any process.
 * The token and PyHP's own variables (`PYHP_*`) are removed from `os.environ` before your code runs.
 * PyHP never logs your code, arguments, or variables. The worker log contains only what Python writes to stderr.
 
@@ -613,9 +816,9 @@ The per-call figure is in line with other process-based bridges. In-process embe
 
 | Platform | Status |
 |---|---|
-| **Linux** | ✅ Tested: PHP 8.3, Python 3.13 (pandas 3.0, NumPy 2.5). |
-| **Windows** | 🎯 Primary target, **not yet run.** The design avoids the known Windows pitfalls: sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, `SYSTEMROOT` passed through. The included CI workflow runs the suite on Windows. Treat Windows as unverified until that passes. |
-| **macOS** | Expected to work like Linux; not tested. |
+| **Linux** | ✅ Tested in CI: PHP 8.2 and 8.4, Python 3.10 and 3.13, with pandas, NumPy, SymPy and spaCy. |
+| **Windows** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). It uses sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, and passes `SYSTEMROOT` through. |
+| **macOS** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). |
 | **32-bit PHP** | ❌ Not supported (PHP integers must be 64-bit). |
 | **Python < 3.10** | ❌ The worker fails at start-up with a clear `WorkerStartException`. |
 
@@ -623,16 +826,33 @@ Process trees: when a worker is killed (timeout, `close()` after the grace perio
 
 ---
 
-## Imports (provisional)
+## Imports
 
-`$py->import('pandas')` returns a module proxy, and `$py->import('pandas', as: 'pd')` also binds `pd` in the namespace for later `exec()`/`eval()` code. That's deliberately minimal for now. Open questions for the next design round:
+`import()` works like Python's `import` statement: it imports, **binds the name in the session namespace**, and returns what it imported.
 
-* `from x import y` style: `$py->from('os.path')->import('join')`? Or `$py->import('os.path.join')`?
-* Whether imports should register automatically in `vars`.
-* A `modules` namespace (`$py->modules->pandas`) alongside `vars` and `functions`.
-* Caching module proxies per session.
+| PHP | Python | Name bound | Returns |
+|---|---|---|---|
+| `$py->import('pandas')` | `import pandas` | `pandas` | module proxy |
+| `$py->import('pandas', as: 'pd')` | `import pandas as pd` | `pd` | module proxy |
+| `$py->import('os.path')` | `import os.path` | `os` (like Python) | the `os.path` module |
+| `$py->import('os.path', as: 'osp')` | `import os.path as osp` | `osp` | the `os.path` module |
+| `$py->import('time', from: 'datetime')` | `from datetime import time` | `time` | class proxy |
+| `$py->import('time', from: 'datetime', as: 't')` | `from datetime import time as t` | `t` | class proxy |
+| `$py->import('pi', from: 'math')` | `from math import pi` | `pi` | `3.141592653589793` (plain data is copied, as everywhere) |
+| `$py->import('util', from: 'importlib')` | `from importlib import util` | `util` | module proxy (submodules work) |
+| `$py->import('*', from: 'math')` | `from math import *` | every public name (`__all__` if defined) | `null` |
 
-Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` covers every case.
+After importing, everything is reachable from both sides: `$py->modules->pd`, `$py->classes->time`, `$py->vars->pi`, and plain Python code in `exec()`/`eval()`.
+
+Errors are Python's own: `ModuleNotFoundError` for a missing module, `ImportError: cannot import name 'x' from 'y'` for a missing name, both as `PythonException`. An invalid alias, `'*'` without `from`, or `'*'` with `as` throws `ProtocolException` before anything runs.
+
+### Is anything cached?
+
+Yes, by Python itself, and only within a session:
+
+* **The first import of a module in a session runs its code** (e.g. ~200–330 ms for pandas). Python then keeps the module in `sys.modules`, so **importing it again in the same session is almost free** (one round trip, ~0.1 ms) and returns the same module object.
+* **A new session is a new Python process** and pays the first import again. That's why reusing one session for many calls matters.
+* PHP doesn't cache proxies: each `$py->modules->pd` asks Python (~0.1 ms) and gets a fresh proxy to the same module. That keeps PHP in sync if Python code rebinds the name later. If you use a module in a hot loop, keep the proxy in a PHP variable: `$pd = $py->modules->pd;`.
 
 ---
 
@@ -651,12 +871,12 @@ Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` 
 **Syntax gaps**
 
 8. No Python operators on proxies (`+`, `>`, `&`, `~`, `@`, …). Use method forms or `eval()`.
-9. No PHP closures as Python callbacks (`df.apply(fn)` with a PHP function). Define callables in Python.
+9. PHP callbacks: one round trip each (~65 µs), only from the thread serving PHP and while PHP waits, at most 32 levels of nesting. Strings/arrays are never callables. See [PHP callbacks](#php-callbacks).
 10. `count($proxy)` doesn't work; use `Py::len()`. `if ($proxy)` is always true.
 11. Proxy `==`/`===` compares proxies, not Python objects.
 12. Python methods named `offsetGet`, `offsetSet`, `offsetExists`, `offsetUnset`, `getIterator`, or like PHP magic methods need `$o->__call('name', [...])`.
 13. No `with` blocks, `async`/`await`, decorators, or `yield` from PHP: write those parts in Python.
-14. No dedicated `classes` namespace yet; instantiate with `functions->ClassName()`.
+14. `modules` shows what is bound; it never imports implicitly. `import()` without `as` binds the top-level package name, like Python.
 15. `execFile()` doesn't run `if __name__ == "__main__":` blocks and doesn't add the script's folder to `sys.path`.
 
 **Conversion**
@@ -666,7 +886,7 @@ Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` 
 18. Python ints beyond 64 bits, sets, dates, Decimals, `pd.NA`/`NaT` and subclasses of built-ins stay proxies.
 19. PHP objects (`DateTime`, enums, DTOs) and resources can't be sent; convert them first.
 20. Non-UTF-8 PHP strings become `bytes`; Python `bytes` come back as plain strings.
-21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default).
+21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default); `Py::rows()`/`Py::columns()` are the fastest way to copy tables.
 
 **Output and diagnostics**
 
@@ -676,7 +896,7 @@ Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` 
 
 **Environment**
 
-25. Windows and macOS not yet verified (see [Platform support](#platform-support)).
+25. SymPy and spaCy are tested in CI on Linux only; other libraries aren't tested by PyHP at all (see [Platform support](#platform-support)).
 26. 64-bit PHP 8.2+ and Python 3.10+ only.
 27. Not a sandbox. Trusted code only.
 28. `multiprocessing` from session code is untested. Functions defined inside the session (rather than in importable modules) can't be pickled into child processes on Windows/macOS (`spawn`).
@@ -699,14 +919,15 @@ Until then, `exec('from os.path import join')` plus `$py->functions->join(...)` 
                                                └───────────────────────────────────────┘
 ```
 
-1. **Start:** PHP opens a server socket on `127.0.0.1` (random port) and starts `python -u pyhp_worker.py` with `proc_open()` and an argument array, with no shell involved. Port, token and limits are passed in environment variables.
-2. **Handshake:** the worker connects, sends `hello` with the token and protocol version. PHP checks both, then closes the server socket.
+1. **Start:** PHP starts `python -u pyhp_worker.py` with `proc_open()` and an argument array, with no shell involved. The token, limits and the path of a temporary *port file* are passed in environment variables.
+2. **Handshake:** the worker listens on `127.0.0.1` (random port) and writes the port to the port file. PHP connects and sends `{"op": "auth", "token": …}`. The worker checks the token, closes its listener, and answers `hello` with the protocol version, which PHP checks. The worker listens rather than PHP because, on Windows, PHP waits 500 ms every time it closes a listening socket.
 3. **Requests:** each frame is a 4-byte big-endian length plus UTF-8 JSON, e.g. `{"op": "call_method", "ref": 7, "name": "head", "args": [3], "kwargs": {}}`. The worker runs it, captures `print()` output, and answers `{"ok": true, "value": …, "out": "…"}` or `{"ok": false, "error": {"kind", "type", "message", "traceback"}}`.
-4. **Values:** JSON natives travel as-is. Other values are tagged objects: `{"$t": "ref", "id": 7, "type": "pandas.DataFrame"}`, `{"$t": "dict", "v": [[key, value], …]}`, `{"$t": "bytes", "v": "<base64>"}`, `{"$t": "float", "v": "nan"}`, `{"$t": "tuple", …}`, `{"$t": "slice", …}`.
+4. **Values:** JSON natives travel as-is, and Python dicts travel as plain JSON objects, so PHP's `json_decode()` produces the final array directly. Every response carries a `tagged` flag; when it's `false` (no references, bytes or NaN/Inf anywhere in the value), PHP uses that array as-is, without a second pass or a second copy. Other values are tagged objects: `{"$t": "ref", "id": 7, "type": "pandas.DataFrame"}`, `{"$t": "bytes", "v": "<base64>"}`, `{"$t": "float", "v": "nan"}`, and `{"$t": "dict", "o": {…}}` for the rare Python dict that itself has a `"$t"` key. From PHP to Python, dicts travel as `{"$t": "dict", "v": [[key, value], …]}` so integer keys stay integers, plus `{"$t": "tuple", …}` and `{"$t": "slice", …}`.
 5. **Releases:** IDs of freed proxies ride along on the next request (`"release": [7, 9]`).
 6. **Timeouts:** PHP waits with `stream_select()` against one deadline per call. On expiry the worker is killed.
+7. **Callbacks:** while Python handles a request it may send `{"op": "php_call", "seq": 1, "cb": 3, "args": [...], "kwargs": {...}}` instead of a response. PHP runs closure #3 (closures travel as `{"$t": "callback", "id": 3}`), pauses the deadline meanwhile, and answers `{"op": "php_return", "seq": 1, "ok": true, "value": ...}`. While Python waits for that answer, PHP may send ordinary requests (the closure calling Python), which Python serves first. Closures Python drops are reported in `"release_callbacks"`.
 
-The protocol is versioned (`protocol: 1`). A mismatch between PHP and Python halves fails at the handshake.
+The protocol is versioned (`protocol: 2` since callbacks). A mismatch between PHP and Python halves fails at the handshake.
 
 ---
 
@@ -744,6 +965,8 @@ PyHP/
 ├── tests/php/                 Pest tests (need a real interpreter)
 ├── tests/python/              pytest tests for the worker
 ├── examples/                  runnable examples + sample data
+├── benchmarks/                overhead.php, startup-trace.php
+├── studies/                   feasibility studies for possible features
 └── docs/PROJECT_CONTEXT.md    design decisions and roadmap
 ```
 
@@ -769,6 +992,25 @@ python -m mypy
 python -m pytest --cov
 ```
 
+### Git hooks
+
+Activate the hooks once per clone:
+
+```bat
+git config core.hooksPath .githooks
+```
+
+* **`pre-commit`** formats, lints and type-checks what you commit: staged PHP files are formatted with Pint (and re-staged) and checked with PHPStan; staged Python files are formatted with `ruff format` (re-staged) and checked with `ruff check` and `mypy`. Commits without PHP or Python files skip all of it. It refuses files that are only partly staged, because re-staging them after formatting would also commit the parts you left out. Python tools come from `.venv` when it exists (`python -m pip install ruff mypy` there).
+* **`pre-push`** blocks direct pushes to `main` and `develop`; use pull requests.
+
+Tests aren't run on commit (the PHP suite takes about 40 s); `composer check`, pytest and CI run them.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs every check on GitHub Actions for each push and pull request: the Python worker on Python 3.10 and 3.13, and the PHP suite on PHP 8.2 and 8.4 with pandas installed, on Linux, Windows and macOS. The Linux PHP jobs also install SymPy, spaCy and `en_core_web_sm`, so `SympyTest` and `SpacyTest` run there; elsewhere they skip.
+
+macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page).
+
 ### Rules the code follows
 
 TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level max, `mypy --strict`, Ruff (`E,F,W,I,B,UP,N,S,ANN,SIM,RUF`), and fail-loudly exceptions. The worker stays standard-library-only.
@@ -777,15 +1019,12 @@ TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level m
 
 ## Roadmap
 
-See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Next up:
+See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Ideas after 0.1.0:
 
-1. **Verify on Windows**, then fix whatever it finds.
-2. **Design imports properly** ([open questions](#imports-provisional)).
-3. **`classes` namespace** next to `vars` and `functions`.
-4. **Faster bulk data:** Arrow/Parquet for DataFrames instead of JSON rows.
-5. **PHP callbacks** (`df.apply($phpClosure)`) — needs calls from Python back into PHP during a request.
-6. Packagist release, after choosing a license.
+1. `Py::ref($object, 'attribute')`: get an attribute as a proxy instead of a copy, so `Py::ref($doc, 'user_data')['k'] = 'v'` writes into Python.
+2. Convert integer-like numbers (such as SymPy's `Integer`) to PHP ints without losing precision.
+3. More examples and optional test suites for popular libraries.
 
 ## License
 
-Not chosen yet. Until a license is added, all rights are reserved by the author.
+PyHP is open-source software licensed under the [MIT license](LICENSE).
