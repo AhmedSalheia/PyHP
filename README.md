@@ -31,19 +31,20 @@ print_r($totals->to_dict());                                // ['west' => 306861
 8. [pandas and NumPy in practice](#pandas-and-numpy-in-practice)
 9. [PHP callbacks](#php-callbacks)
 10. [SymPy and spaCy in practice](#sympy-and-spacy-in-practice)
-11. [Printed output and the log](#printed-output-and-the-log)
-12. [Errors](#errors)
-13. [Object lifetime and memory](#object-lifetime-and-memory)
-14. [Performance](#performance)
-15. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
-16. [Security](#security)
-17. [Platform support](#platform-support)
-18. [Imports](#imports)
-19. [Every limitation in one list](#every-limitation-in-one-list)
-20. [How it works inside](#how-it-works-inside)
-21. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
-22. [Development](#development)
-23. [Roadmap](#roadmap)
+11. [More libraries in practice](#more-libraries-in-practice)
+12. [Printed output and the log](#printed-output-and-the-log)
+13. [Errors](#errors)
+14. [Object lifetime and memory](#object-lifetime-and-memory)
+15. [Performance](#performance)
+16. [Where you can use it (CLI, web, long-running PHP)](#where-you-can-use-it)
+17. [Security](#security)
+18. [Platform support](#platform-support)
+19. [Imports](#imports)
+20. [Every limitation in one list](#every-limitation-in-one-list)
+21. [How it works inside](#how-it-works-inside)
+22. [PyHP vs. swoole/phpy](#pyhp-vs-swoolephpy)
+23. [Development](#development)
+24. [Roadmap](#roadmap)
 
 ---
 
@@ -217,13 +218,19 @@ More complete, runnable examples are in [`examples/`](examples):
 | `05_callbacks.php` | PHP closures called from Python: `sorted(key=...)`, pandas `apply`, exceptions |
 | `06_sympy.php` | SymPy: solving, calculus, LaTeX, exact values, `lambdify`, matrices |
 | `07_spacy_nlp.php` | spaCy: entities, sentences, lemmas, the Matcher, `nlp.pipe`, a PHP pipeline component, displaCy HTML |
+| `08_standard_library.php` | No installs: "did you mean" and diffs (`difflib`), `statistics`, `itertools`, exact `Fraction`/`Decimal`, `Counter`, `ipaddress` |
+| `09_matplotlib_charts.php` | matplotlib: a chart from PHP arrays as a PNG file, an inline SVG for a web page, and PNG bytes for an HTTP response |
+| `10_pillow_images.php` | Pillow: thumbnails, square avatars, watermarks, WebP bytes in memory, images from PHP strings |
+| `11_scikit_learn.php` | scikit-learn: train on PHP arrays, measure accuracy, predict probabilities, save and reload the model with joblib |
 
-Run them with your interpreter:
+To run them from a clone of PyHP, install their Python packages once (into `.venv`, which PyHP then finds by itself), then run any example:
 
 ```bat
-set PYHP_PYTHON=C:\path\to\.venv\Scripts\python.exe
-php examples\03_pandas_report.php
+php bin/pyhp setup
+php examples\09_matplotlib_charts.php
 ```
+
+`bin/pyhp setup` reads `extra.pyhp` in PyHP's own `composer.json`, which points at `requirements-dev.txt`: every library the examples and optional tests use, plus the Python dev tools. Each example lists the one package it needs, if you'd rather install less.
 
 ---
 
@@ -740,6 +747,44 @@ Other NLP libraries (NLTK, Hugging Face `transformers`, `sentence-transformers`,
 
 ---
 
+## More libraries in practice
+
+The same pattern covers most of Python: import, call through proxies, copy plain results into PHP. Examples 08–11 show four common cases; each has an optional test suite (`StandardLibraryTest`, `MatplotlibTest`, `PillowTest`, `ScikitLearnTest`) that skips when the library isn't installed.
+
+**Standard library** (no installs): `difflib` for "did you mean" suggestions and text diffs, `statistics` (median, quantiles, correlation), `itertools` combinations, exact `fractions.Fraction` and `decimal.Decimal`, `collections.Counter`, `ipaddress` networks.
+
+* Generators and iterators (`itertools.product`, `difflib.unified_diff`) come back as proxies; wrap them in `$py->functions->list(...)` to get a PHP array, or `foreach` over them.
+* `Fraction` and `Decimal` stay proxies so they stay exact; print them or convert with `float()`/`str()`. There are no operators on proxies, so add with `->__add__()` or in `eval()`.
+
+**Charts with matplotlib:**
+
+```php
+$py->import('matplotlib')->use('Agg');           // no screen on a server: set BEFORE importing pyplot
+$plt = $py->import('matplotlib.pyplot', as: 'plt');
+[$fig, $ax] = $plt->subplots(figsize: Py::tuple(8, 4));
+$ax->bar($months, $revenue);
+$fig->savefig('chart.png', dpi: 150);
+$plt->close($fig);                               // free the figure in long-running PHP
+```
+
+* For a web page, render SVG into `io.StringIO` and echo the string; for an HTTP image response, render PNG into `io.BytesIO`: Python `bytes` arrive in PHP as a binary string.
+
+**Images with Pillow:**
+
+* `$Image->open($path)`, `->thumbnail(Py::tuple(400, 400))` (in place, keeps the aspect ratio), `ImageOps::fit()` for square crops, `->save($file, quality: 85)`.
+* Image data moves both ways as strings: `$buffer->getvalue()` gives PHP the bytes, and `$Image->open($io->BytesIO($phpString))` reads an upload without a temporary file. PHP strings that aren't valid UTF-8 are sent as `bytes`, which is what binary image data always is.
+* Call `ImageOps.exif_transpose()` on phone photos so they aren't sideways.
+
+**Machine learning with scikit-learn:**
+
+* PHP arrays of rows are valid training data: `$model->fit($rows, $labels)`. Results are NumPy arrays; call `->tolist()` to copy them into PHP.
+* `train_test_split()` returns four lists that PHP can destructure: `[$xTrain, $xTest, $yTrain, $yTest] = ...`.
+* Train once and save with `joblib.dump()`; later requests `joblib.load()` the file instead of retraining. Loading is much cheaper than training, but still costs time: reuse one session where you can.
+
+Other popular libraries (requests/httpx, BeautifulSoup, openpyxl, OpenCV, PyTorch, Hugging Face `transformers`) follow the same rules. Watch out for import and model-loading time, keep heavy objects in one long-lived session, and copy only the results PHP needs.
+
+---
+
 ## Printed output and the log
 
 Python has two kinds of output, and PyHP treats them differently.
@@ -1034,6 +1079,7 @@ PyHP/
 │   └── Internal/              Worker (process + socket), Codec (wire format)
 ├── bin/pyhp                   command line tool (vendor/bin/pyhp)
 ├── python/pyhp_worker.py      the worker (standard library only)
+├── requirements-dev.txt       Python packages for the examples, optional tests and dev tools
 ├── tests/php/                 Pest tests (need a real interpreter)
 ├── tests/python/              pytest tests for the worker
 ├── examples/                  runnable examples + sample data
@@ -1046,22 +1092,23 @@ PyHP/
 
 ```bat
 composer install
-set PYHP_TEST_PYTHON=C:\path\to\.venv\Scripts\python.exe
+php bin/pyhp setup
 vendor\bin\pint --test
 vendor\bin\phpstan analyse
 vendor\bin\pest --coverage --min=80
 ```
 
-Or all at once: `composer check`. Coverage needs PCOV or Xdebug. The pandas/NumPy tests are skipped automatically if those packages aren't installed in the interpreter under test.
+Or all at once: `composer check`. Coverage needs PCOV or Xdebug. The tests use the `.venv` that `php bin/pyhp setup` creates (or the interpreter in `PYHP_TEST_PYTHON`). Tests for optional libraries (pandas, NumPy, SymPy, spaCy, matplotlib, Pillow, scikit-learn) are skipped automatically when the library isn't installed.
 
 ### Python checks
 
+`php bin/pyhp setup` installs the tools too. Then:
+
 ```bat
-python -m pip install pytest pytest-cov mypy ruff numpy
-python -m ruff format --check python tests/python
-python -m ruff check python tests/python
-python -m mypy
-python -m pytest --cov
+.venv\Scripts\python.exe -m ruff format --check python tests/python
+.venv\Scripts\python.exe -m ruff check python tests/python
+.venv\Scripts\python.exe -m mypy
+.venv\Scripts\python.exe -m pytest --cov
 ```
 
 ### Git hooks

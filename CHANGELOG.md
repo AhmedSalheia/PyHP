@@ -10,6 +10,11 @@ All notable changes to PyHP are documented here. The format follows
 - `vendor/bin/pyhp setup`: creates the project's Python virtual environment and installs the packages listed under `extra.pyhp.requirements` in `composer.json` (or in `requirements.txt`). Uses uv when installed, which also downloads the requested Python version; otherwise the system Python with venv and pip. Safe to run again; `--python`, `--venv`, `--no-uv` and `--dry-run` options.
 - `Py::ref($object, 'attribute')`: a live proxy to an attribute instead of a copy, so dicts and lists held by Python objects can be changed in place (`Py::ref($doc, 'user_data')['k'] = 'v'`).
 - `Config::detectPython()`: PyHP now finds the interpreter by itself when the `python` option isn't set: the `PYHP_PYTHON` environment variable, then the Composer project's `.venv` (or `extra.pyhp.venv`), then `python`/`python3`.
+- Examples `08_standard_library.php` (difflib, statistics, itertools, fractions/decimal, Counter, ipaddress), `09_matplotlib_charts.php`, `10_pillow_images.php` and `11_scikit_learn.php`, with optional test suites that skip when the library isn't installed; README section "More libraries in practice".
+- `requirements-dev.txt`, referenced from PyHP's own `extra.pyhp`: `php bin/pyhp setup` in a clone installs everything the examples, optional tests and Python checks need.
+
+### Changed
+- The examples and the test suite use the interpreter PyHP detects (the repository's `.venv` after `php bin/pyhp setup`) instead of requiring `PYHP_PYTHON` / `PYHP_TEST_PYTHON`; both variables still work.
 
 ## [0.1.1] - 2026-11-07
 
