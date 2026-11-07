@@ -6,6 +6,10 @@ All notable changes to PyHP are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `vendor/bin/pyhp setup`: creates the project's Python virtual environment and installs the packages listed under `extra.pyhp.requirements` in `composer.json` (or in `requirements.txt`). Uses uv when installed, which also downloads the requested Python version; otherwise the system Python with venv and pip. Safe to run again; `--python`, `--venv`, `--no-uv` and `--dry-run` options.
+- `Config::detectPython()`: PyHP now finds the interpreter by itself when the `python` option isn't set: the `PYHP_PYTHON` environment variable, then the Composer project's `.venv` (or `extra.pyhp.venv`), then `python`/`python3`.
+
 ## [0.1.1] - 2026-11-07
 
 ### Changed

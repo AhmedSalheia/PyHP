@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace PyHP;
 
+use Composer\InstalledVersions;
 use PyHP\Exception\ConfigException;
+use PyHP\Setup\SetupConfig;
+use PyHP\Setup\VirtualEnv;
 
 /**
  * Immutable settings for one Python session.
@@ -32,7 +35,8 @@ final readonly class Config
     public string $python;
 
     /**
-     * @param  string|null  $python  Interpreter to run: a command on PATH or a full path (e.g. a venv's python.exe).
+     * @param  string|null  $python  Interpreter to run: a command on PATH or a full path (e.g. a venv's python.exe);
+     *                               null uses detectPython().
      * @param  float|null  $timeout  Seconds one call may take; null waits forever.
      * @param  float  $startupTimeout  Seconds to wait for the worker to start and connect.
      * @param  string|null  $cwd  Working directory of the Python process; null inherits PHP's.
@@ -57,7 +61,7 @@ final readonly class Config
         public ?string $logFile = null,
         public int $iterBatchSize = self::DEFAULT_ITER_BATCH_SIZE,
     ) {
-        $this->python = $python ?? self::defaultPython();
+        $this->python = $python ?? self::detectPython();
 
         if ($this->python === '') {
             throw new ConfigException('Option "python" must not be empty.');
@@ -76,9 +80,47 @@ final readonly class Config
         }
     }
 
+    /** The interpreter used when nothing else is found: "python" on Windows, "python3" elsewhere. */
     public static function defaultPython(): string
     {
         return PHP_OS_FAMILY === 'Windows' ? 'python' : 'python3';
+    }
+
+    /**
+     * The interpreter to use when none is configured, in this order:
+     * the PYHP_PYTHON environment variable, the project's virtual environment
+     * (.venv, or extra.pyhp.venv in composer.json, as created by `pyhp setup`),
+     * then defaultPython().
+     *
+     * @param  string|null  $projectRoot  null means the root of the Composer project PyHP is installed in
+     */
+    public static function detectPython(?string $projectRoot = null): string
+    {
+        $fromEnv = getenv('PYHP_PYTHON');
+        if (is_string($fromEnv) && $fromEnv !== '') {
+            return $fromEnv;
+        }
+
+        $root = $projectRoot ?? self::projectRoot();
+        if ($root !== null) {
+            $venvPython = VirtualEnv::python(SetupConfig::fromProject($root)->venvPath($root));
+            if (is_file($venvPython)) {
+                return $venvPython;
+            }
+        }
+
+        return self::defaultPython();
+    }
+
+    private static function projectRoot(): ?string
+    {
+        // Composer always generates this class; it's missing only when PyHP is loaded some other way.
+        if (! class_exists(InstalledVersions::class)) {
+            return null;
+        }
+        $root = realpath(InstalledVersions::getRootPackage()['install_path']);
+
+        return $root === false ? null : $root;
     }
 
     /**
