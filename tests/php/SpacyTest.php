@@ -117,3 +117,11 @@ test('a pipeline component can be a PHP closure', function (): void {
     expect($seen)->toBe([6])
         ->and($doc->_->checked_by)->toBe('PHP');
 })->skip(fn () => ! pythonHasModule('spacy'), 'spaCy is not installed');
+
+test('doc.user_data can be written from PHP through Py::ref', function (): void {
+    $doc = $this->spacy->blank('en')('Checked by PHP.');
+
+    Py::ref($doc, 'user_data')['checked_by'] = 'PHP';
+
+    expect($doc->user_data)->toBe(['checked_by' => 'PHP']);
+})->skip(fn () => ! pythonHasModule('spacy'), 'spaCy is not installed');

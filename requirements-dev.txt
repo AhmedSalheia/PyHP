@@ -1,0 +1,21 @@
+# Python packages for PyHP's own development: the examples, the optional test
+# suites and the Python checks. Install them into .venv with:
+#   php bin/pyhp setup
+# (composer.json points extra.pyhp.requirements at this file.)
+
+# Python checks (pytest, coverage, type checking, lint)
+pytest
+pytest-cov
+coverage>=7.10
+mypy
+ruff
+
+# Examples and optional test suites
+pandas
+numpy
+sympy
+spacy
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+matplotlib
+pillow
+scikit-learn

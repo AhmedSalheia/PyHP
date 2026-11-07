@@ -1,0 +1,77 @@
+# 16. Development
+
+## Development
+
+```
+PyHP/
+├── src/                       PHP library (namespace PyHP\)
+│   ├── Py.php                 static facade + helpers
+│   ├── Session.php            one worker + namespace
+│   ├── Vars.php, Functions.php
+│   ├── PyObject.php           the proxy
+│   ├── Config.php, OutputMode.php
+│   ├── Setup/                 pyhp setup: SetupConfig, Installer, ProcessRunner
+│   ├── Console/               the vendor/bin/pyhp command line
+│   ├── Value/                 Tuple, Slice, Dict markers
+│   ├── Exception/             exception hierarchy
+│   └── Internal/              Worker (process + socket), Codec (wire format)
+├── bin/pyhp                   command line tool (vendor/bin/pyhp)
+├── python/pyhp_worker.py      the worker (standard library only)
+├── requirements-dev.txt       Python packages for the examples, optional tests and dev tools
+├── tests/php/                 Pest tests (need a real interpreter)
+├── tests/python/              pytest tests for the worker
+├── examples/                  runnable examples + sample data
+├── benchmarks/                overhead.php, startup-trace.php
+├── studies/                   feasibility studies for possible features
+└── docs/PROJECT_CONTEXT.md    design decisions and roadmap
+```
+
+### PHP checks (Windows)
+
+```bat
+composer install
+php bin/pyhp setup
+vendor\bin\pint --test
+vendor\bin\phpstan analyse
+vendor\bin\pest --coverage --min=80
+```
+
+Or all at once: `composer check`. Coverage needs PCOV or Xdebug. The tests use the `.venv` that `php bin/pyhp setup` creates (or the interpreter in `PYHP_TEST_PYTHON`). Tests for optional libraries (pandas, NumPy, SymPy, spaCy, matplotlib, Pillow, scikit-learn) are skipped automatically when the library isn't installed.
+
+### Python checks
+
+`php bin/pyhp setup` installs the tools too. Then:
+
+```bat
+.venv\Scripts\python.exe -m ruff format --check python tests/python
+.venv\Scripts\python.exe -m ruff check python tests/python
+.venv\Scripts\python.exe -m mypy
+.venv\Scripts\python.exe -m pytest --cov
+```
+
+### Git hooks
+
+Activate the hooks once per clone:
+
+```bat
+git config core.hooksPath .githooks
+```
+
+* **`pre-commit`** formats, lints and type-checks what you commit: staged PHP files are formatted with Pint (and re-staged) and checked with PHPStan; staged Python files are formatted with `ruff format` (re-staged) and checked with `ruff check` and `mypy`. Commits without PHP or Python files skip all of it. It refuses files that are only partly staged, because re-staging them after formatting would also commit the parts you left out. Python tools come from `.venv` when it exists (`python -m pip install ruff mypy` there).
+* **`pre-push`** blocks direct pushes to `main` and `develop`; use pull requests.
+
+Tests aren't run on commit (the PHP suite takes about 40 s); `composer check`, pytest and CI run them.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs every check on GitHub Actions for each push and pull request: the Python worker on Python 3.10 and 3.13, and the PHP suite on PHP 8.2 and 8.4 with pandas installed, on Linux, Windows and macOS. The Linux PHP jobs also install everything in `requirements-dev.txt`, so every optional library suite runs there; elsewhere those suites skip.
+
+macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page).
+
+### Rules the code follows
+
+TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level max, `mypy --strict`, Ruff (`E,F,W,I,B,UP,N,S,ANN,SIM,RUF`), and fail-loudly exceptions. The worker stays standard-library-only.
+
+---
+
+← [How PyHP works inside](15-internals.md) · [Contents](README.md)

@@ -28,6 +28,9 @@
         "pestphp/pest": "^3.0",
         "phpstan/phpstan": "^2.0"
     },
+    "bin": [
+        "bin/pyhp"
+    ],
     "autoload": {
         "psr-4": {
             "PyHP\\": "src/"
@@ -51,6 +54,11 @@
             "@putenv XDEBUG_MODE=coverage",
             "pest --coverage --min=80"
         ]
+    },
+    "extra": {
+        "pyhp": {
+            "requirements": "requirements-dev.txt"
+        }
     },
     "config": {
         "sort-packages": true,

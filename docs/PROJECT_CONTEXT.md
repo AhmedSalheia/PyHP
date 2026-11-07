@@ -71,6 +71,9 @@ Why a socket instead of pipes: PHP on Windows can't `stream_select()` on pipes, 
 | D22 | SymPy and spaCy examples with optional Pest suites; CI installs them on Linux only. Merged (PR #11). |
 | D23 | 0.1.0 is released through `release/0.1.0` → `main`; Ahmed's code review happens on that PR, and review fixes are committed to the release branch. |
 | D24 | Everything PyHP lives under one name: Packagist vendor `pyhp`, GitHub organization `pyhp-php` (`pyhp` was taken), repository `pyhp-php/pyhp`. `ahmedsalheia/pyhp` is abandoned on Packagist in favour of `pyhp/pyhp`. Future packages go under the same vendor (e.g. `pyhp/laravel`). |
+| D25 | Documentation lives in numbered `docs/NN-topic.md` files, read in order; the README is a short overview (examples, install, contributing, about the project and the author, donations placeholder). |
+| D26 | Every change gets a CHANGELOG line under **[@dev]** when it's made; releases move them under the version. |
+| D27 | `vendor/bin/pyhp info` is the first debugging step: PHP, project settings, chosen interpreter and why, packages, uv, a live worker test, problems with fixes; exit code 1 on problems so CI can use it. |
 
 ## 6. Implemented (as of 2026-11-07)
 
@@ -109,11 +112,14 @@ Done on 2026-11-07: Windows validation and fixes, imports, `modules`, `classes`,
 
 Also done: SymPy and spaCy examples and tests (PR #11), pre-commit hook, CI actions on v6.
 
+Also done: 0.1.1 as `pyhp/pyhp` from `pyhp-php/pyhp` (D24); `vendor/bin/pyhp setup` with uv and `Config::detectPython()`; `Py::ref()`; examples 08–11 (standard library, matplotlib, Pillow, scikit-learn) with optional suites; `requirements-dev.txt`; docs folder (D25); `[@dev]` changelog rule (D26).
+
 Next:
 
-1. **Move to the `pyhp` vendor** (D24): transfer the repo to `pyhp-php/pyhp`, merge the rename branch, release 0.1.1, submit `pyhp/pyhp` to Packagist, abandon `ahmedsalheia/pyhp`. Then design `vendor/bin/pyhp setup` with uv (study first).
-2. After 0.1.0: `Py::ref($object, 'attribute')` for writing into attributes that would otherwise be copied; lossless conversion of integer-like numbers (SymPy `Integer`); more library examples.
-3. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches, a thread-safe callback mode.
+1. **0.2.0** released 2026-11-07 (setup, info, `Py::ref()`, examples 08–11, docs folder). Next: switch the sample project to `pyhp setup` as the final check.
+2. **Must come back to:** Python requirements declared by *other* Composer packages. Libraries built on PyHP (e.g. a future `pyhp/laravel`, or any package that uses spaCy) should declare their own `extra.pyhp.requirements`, and `pyhp setup` should collect them from every installed package (`vendor/composer/installed.json`), merge them with the root project's, and report conflicts. Needs decisions on conflicting versions and on whether the root project can override or exclude them.
+3. Lossless conversion of integer-like numbers (SymPy `Integer`) to PHP int (maybe 0.3.0).
+4. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches, a thread-safe callback mode, a docs website.
 
 ## 10. How Claude should work with me
 
