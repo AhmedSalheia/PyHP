@@ -8,6 +8,8 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+## [0.2.0] - 2026-11-07
+
 ### Added
 - `vendor/bin/pyhp setup`: creates the project's Python virtual environment and installs the packages listed under `extra.pyhp.requirements` in `composer.json` (or in `requirements.txt`). Uses uv when installed, which also downloads the requested Python version; otherwise the system Python with venv and pip. Safe to run again; `--python`, `--venv`, `--no-uv` and `--dry-run` options.
 - `Py::ref($object, 'attribute')`: a live proxy to an attribute instead of a copy, so dicts and lists held by Python objects can be changed in place (`Py::ref($doc, 'user_data')['k'] = 'v'`).
@@ -54,6 +56,7 @@ First public release.
 - CI on Linux, Windows and macOS with PHP 8.2 / 8.4 and Python 3.10 / 3.13: Pest (80% coverage gate), PHPStan max, Pint, pytest, mypy --strict, ruff.
 - SymPy and spaCy suites on Linux; pandas and NumPy on all three systems.
 
-[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...develop
+[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.2.0...develop
+[0.2.0]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/pyhp-php/pyhp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pyhp-php/pyhp/releases/tag/v0.1.0
