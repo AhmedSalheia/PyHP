@@ -55,6 +55,11 @@
             "pest --coverage --min=80"
         ]
     },
+    "extra": {
+        "pyhp": {
+            "requirements": "requirements-dev.txt"
+        }
+    },
     "config": {
         "sort-packages": true,
         "allow-plugins": {

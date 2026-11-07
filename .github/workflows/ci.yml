@@ -41,7 +41,7 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install pandas numpy
       - if: runner.os == 'Linux'
-        run: python -m pip install sympy spacy && python -m spacy download en_core_web_sm
+        run: python -m pip install -r requirements-dev.txt
         
       - uses: shivammathur/setup-php@v2
         with:

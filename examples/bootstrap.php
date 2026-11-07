@@ -2,15 +2,11 @@
 
 declare(strict_types=1);
 
-// Shared setup for the examples. Point PYHP_PYTHON at your interpreter, e.g.
-//   Windows:  set PYHP_PYTHON=C:\path\to\venv\Scripts\python.exe
-//   Linux:    export PYHP_PYTHON=/path/to/venv/bin/python
+// Shared setup for the examples. Install the Python packages they use once, from
+// the PyHP folder:
+//   php bin/pyhp setup
+// PyHP then finds that .venv by itself. To use another interpreter, set
+// PYHP_PYTHON (e.g. set PYHP_PYTHON=C:\path\to\python.exe) or call
+// Py::config(['python' => ...]).
 
 require __DIR__.'/../vendor/autoload.php';
-
-use PyHP\Py;
-
-$python = getenv('PYHP_PYTHON');
-if (is_string($python) && $python !== '') {
-    Py::config(['python' => $python]);
-}
