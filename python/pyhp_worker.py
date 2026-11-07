@@ -33,13 +33,15 @@ import time
 import tokenize
 import traceback
 import types
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import Final, Protocol, TypeAlias, cast
 
 PROTOCOL_VERSION: Final = 1
 INT64_MIN: Final = -(2**63)
 INT64_MAX: Final = 2**63 - 1
 MAX_DEPTH: Final = 256
+# Encoding uses up to 4 frames per nesting level, plus room for the caller's stack.
+RECURSION_LIMIT: Final = MAX_DEPTH * 4 + 1000
 DEFAULT_MAX_FRAME: Final = 64 * 1024 * 1024
 NAMESPACE_MODULE: Final = "__pyhp__"
 HEADER: Final = struct.Struct(">I")
@@ -101,6 +103,9 @@ def type_name(value: object) -> str:
     return f"{cls.__module__}.{cls.__qualname__}"
 
 
+_STR_ONLY: Final = frozenset({str})
+_MISSING: Final = object()
+
 # --------------------------------------------------------------------------- #
 # Python -> wire
 # --------------------------------------------------------------------------- #
@@ -120,13 +125,56 @@ class _EncodeState:
         # Whether any tagged value was produced. If not, PHP can use json_decode's
         # result as-is instead of walking it again (saves time and a full copy).
         self.tagged = False
+        # Ids of references created by this conversion (so a caller can undo them).
+        self.refs: list[int] = []
+        self.first_ref_type = ""
+        # Validated key sets: rows of a table repeat the same keys, and checking
+        # keys is the most expensive part of converting a dict.
+        self.key_sets: dict[tuple[object, ...], tuple[str, ...] | None] = {}
 
     def tag(self, value: Json) -> Json:
         self.tagged = True
         return value
 
     def ref(self, value: object) -> Json:
-        return self.tag(_ref(value, self.registry))
+        encoded = _ref(value, self.registry)
+        assert isinstance(encoded, dict)  # noqa: S101  # _ref always builds a dict
+        ref_id = encoded["id"]
+        assert isinstance(ref_id, int)  # noqa: S101  # ids are ints
+        self.refs.append(ref_id)
+        if not self.first_ref_type:
+            self.first_ref_type = type_name(value)
+        return self.tag(encoded)
+
+    def json_keys(self, value: dict[object, object]) -> tuple[str, ...] | None:
+        """The JSON object keys for this dict, or None if PHP can't hold its keys.
+
+        Rows of a table share one key set, so the result is cached per key set
+        (only for str/int keys, where equal keys always have equal types).
+        """
+        keys = tuple(value)
+        # Only all-str key sets are cached: a str is never equal to a key of another
+        # type, so a cache hit can't mix up e.g. 1 and True. (C-level type check.)
+        cacheable = set(map(type, keys)) <= _STR_ONLY
+        if cacheable:
+            cached = self.key_sets.get(keys, _MISSING)
+            if cached is not _MISSING:
+                return cached  # type: ignore[return-value]  # only key-set results are stored
+        seen: set[int | str] = set()
+        for key in keys:
+            php_key = _php_key(key, self.strict)
+            if php_key is None or php_key in seen:
+                if self.strict:
+                    msg = f"cannot convert dict key {key!r} to a distinct PHP array key"
+                    raise ConversionError(msg)
+                result = None
+                break
+            seen.add(php_key)
+        else:
+            result = tuple(key if type(key) is str else str(key) for key in keys)
+        if cacheable:
+            self.key_sets[keys] = result
+        return result
 
 
 def encode(value: object, registry: Registry, *, strict: bool = False) -> Json:
@@ -147,16 +195,41 @@ def encode(value: object, registry: Registry, *, strict: bool = False) -> Json:
 
 def encode_value(value: object, registry: Registry, *, strict: bool = False) -> tuple[Json, bool]:
     """Like ``encode``, also saying whether the result contains any tagged value."""
+    _ensure_recursion_room()
     state = _EncodeState(registry, strict)
     result = _encode(value, state, 0)
     return result, state.tagged
+
+
+def _ensure_recursion_room() -> None:
+    """Make room for MAX_DEPTH levels of nesting (a few frames each).
+
+    Python 3.10 and 3.11 allow only 1000 frames by default, which a value
+    nested close to MAX_DEPTH would exceed.
+    """
+    if sys.getrecursionlimit() < RECURSION_LIMIT:
+        sys.setrecursionlimit(RECURSION_LIMIT)
 
 
 def _ref(value: object, registry: Registry) -> Json:
     return {"$t": "ref", "id": registry.add(value), "type": type_name(value)}
 
 
-def _encode(value: object, state: _EncodeState, depth: int) -> Json:
+def _encode(value: object, state: _EncodeState, depth: int) -> Json:  # fast paths
+    if not state.strict:
+        # Fast paths for the exact types that make up almost all data. Anything
+        # unusual falls through to the full rules below, which decide the same way.
+        if type(value) is str:
+            if value.isascii():
+                return value
+        elif type(value) is float:
+            if value - value == 0.0:  # finite (inf - inf and nan - nan are nan)
+                return value
+        elif type(value) is int:
+            if INT64_MIN <= value <= INT64_MAX:
+                return value
+        elif value is None or type(value) is bool:
+            return value
     try:
         scalar = _encode_scalar(value, state.strict)
     except _UnconvertibleError:
@@ -247,22 +320,35 @@ def _encode_container(value: object, state: _EncodeState, depth: int) -> Json:
     if isinstance(value, dict):
         # Check every key before encoding any value, so a dict that has to stay in
         # Python doesn't leave references to its values behind in the registry.
-        seen_keys: set[int | str] = set()
-        for key in value:
-            php_key = _php_key(key, state.strict)
-            if php_key is None or php_key in seen_keys:
-                if state.strict:
-                    msg = f"cannot convert dict key {key!r} to a distinct PHP array key"
-                    raise ConversionError(msg)
-                return None
-            seen_keys.add(php_key)
-        obj: dict[str, Json] = {
-            str(key): _encode(item, state, depth + 1) for key, item in value.items()
-        }
+        json_keys = state.json_keys(value)
+        if json_keys is None:
+            return None
+        values = _encode_items(value.values(), state, depth + 1)
+        obj: dict[str, Json] = dict(zip(json_keys, values, strict=True))
         return state.tag({"$t": "dict", "o": obj}) if "$t" in obj else obj
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [_encode(item, state, depth + 1) for item in value]
+        return _encode_items(value, state, depth + 1)
     return None
+
+
+def _encode_items(items: Iterable[object], state: _EncodeState, depth: int) -> list[Json]:
+    """Encode a sequence; plain scalars skip the function call (most of a table)."""
+    if state.strict:
+        return [_encode(item, state, depth) for item in items]
+    out: list[Json] = []
+    append = out.append
+    for item in items:
+        if (
+            (type(item) is float and item - item == 0.0)
+            or (type(item) is int and INT64_MIN <= item <= INT64_MAX)
+            or (type(item) is str and item.isascii())
+            or item is None
+            or type(item) is bool
+        ):
+            append(item)
+        else:
+            append(_encode(item, state, depth))
+    return out
 
 
 def _php_key(key: object, strict: bool) -> int | str | None:
@@ -406,6 +492,7 @@ class Session:
             "to_php": lambda r: _Raw(*encode_value(self._target(r), self.registry, strict=True)),
             "iter": lambda r: self._as_ref(iter(self._iterable(r))),
             "next_batch": self._next_batch,
+            "table": self._table,
         }
 
     # -- request dispatch ---------------------------------------------------- #
@@ -670,6 +757,46 @@ class Session:
         args, kwargs = self._call_args(request)
         return method(*args, **kwargs)
 
+    def _table(self, request: Request) -> object:
+        """A pandas DataFrame as {"columns": [names], "data": [[column values], ...]}.
+
+        Made for PHP: missing values (NaN, None, NaT, pd.NA) become null, dates and
+        durations become ISO 8601 strings, and the index is left out. Cells PHP
+        can't hold (Decimal, date objects, ...) are an error naming the column,
+        never a reference per cell.
+        """
+        frame = self._target(request)
+        pandas = sys.modules.get("pandas")
+        data_frame = getattr(pandas, "DataFrame", None) if pandas is not None else None
+        if not isinstance(data_frame, type) or not isinstance(frame, data_frame):
+            msg = f"a pandas DataFrame is needed, not a {type_name(frame)}"
+            raise TypeError(msg)
+        names: list[object] = frame.columns.tolist()  # type: ignore[attr-defined]  # checked to be a DataFrame above
+        seen: set[int | str] = set()
+        for name in names:
+            php_key = _php_key(name, strict=False)
+            if php_key is None or php_key in seen:
+                msg = (
+                    f"column name {name!r} can't be a distinct PHP array key; "
+                    "rename the columns first (e.g. df.columns = [str(c) for c in df.columns])"
+                )
+                raise ConversionError(msg)
+            seen.add(php_key)
+
+        state = _EncodeState(self.registry, strict=False)
+        data: list[Json] = []
+        for position, name in enumerate(names):
+            values = _column_values(frame.iloc[:, position])  # type: ignore[attr-defined]  # a DataFrame
+            data.append(_encode_items(values, state, 2))
+            if state.refs:
+                self.registry.release(state.refs)
+                msg = (
+                    f"column {name!r} holds {state.first_ref_type} values, which have no PHP "
+                    f"equivalent; convert the column first, e.g. df[{name!r}].astype(str)"
+                )
+                raise ConversionError(msg)
+        return _Raw({"columns": names, "data": data}, state.tagged)  # type: ignore[dict-item]  # names were checked to be str/int above
+
     def _next_batch(self, request: Request) -> object:
         iterator = self._target(request)
         if not isinstance(iterator, Iterator):
@@ -682,6 +809,23 @@ class Session:
             if len(items) >= size:
                 return {"items": items, "done": False}
         return {"items": items, "done": True}
+
+
+def _column_values(column: object) -> list[object]:
+    """A pandas Series as plain Python values, with missing values as None."""
+    kind = getattr(getattr(column, "dtype", None), "kind", None)
+    values: list[object] = column.tolist()  # type: ignore[attr-defined]  # a pandas Series
+    if kind in ("M", "m"):  # datetime64 (also with time zone) and timedelta64
+        return [None if _is_missing(v) else v.isoformat() for v in values]  # type: ignore[attr-defined]  # Timestamp/Timedelta
+    missing: list[bool] = column.isna().tolist()  # type: ignore[attr-defined]  # a pandas Series
+    if any(missing):
+        return [None if gap else value for value, gap in zip(values, missing, strict=True)]
+    return values
+
+
+def _is_missing(value: object) -> bool:
+    # NaT is not equal to itself, like NaN.
+    return value is None or value != value  # deliberate NaN/NaT check
 
 
 _KINDS: Final = ("any", "module", "class", "callable")

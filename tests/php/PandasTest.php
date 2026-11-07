@@ -68,3 +68,66 @@ test('pandas timestamps stay in Python', function (): void {
         ->and($stamp->isoformat())->toBe('2024-05-01T10:30:00')
         ->and($stamp->year)->toBe(2024);
 })->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
+
+test('Py::rows and Py::columns copy a DataFrame in PHP-friendly form', function (): void {
+    $this->py->exec(<<<'PY'
+        import numpy as np, pandas as pd
+        df = pd.DataFrame({
+            'id': [1, 2],
+            'price': [9.5, np.nan],
+            'name': ['café', None],
+            'when': pd.to_datetime(['2024-01-02 03:04:05', None]),
+        }, index=[10, 20])
+        PY);
+    $df = $this->py->vars->df;
+
+    $rows = Py::rows($df);
+    $columns = Py::columns($df);
+
+    expect($rows)->toBe([
+        ['id' => 1, 'price' => 9.5, 'name' => 'café', 'when' => '2024-01-02T03:04:05'],
+        ['id' => 2, 'price' => null, 'name' => null, 'when' => null],
+    ])
+        ->and($columns)->toBe([
+            'id' => [1, 2],
+            'price' => [9.5, null],
+            'name' => ['café', null],
+            'when' => ['2024-01-02T03:04:05', null],
+        ])
+        ->and(json_encode($rows))->toBeString();
+})->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
+
+test('Py::rows handles empty frames and infinite floats', function (): void {
+    $this->py->exec("import numpy as np, pandas as pd\nempty = pd.DataFrame({'a': []})\ninf = pd.DataFrame({'x': [np.inf]})");
+
+    expect(Py::rows($this->py->vars->empty))->toBe([])
+        ->and(Py::columns($this->py->vars->empty))->toBe(['a' => []])
+        ->and(Py::rows($this->py->vars->inf))->toBe([['x' => INF]]);
+})->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
+
+test('Py::rows refuses cells PHP cannot hold and names the column', function (): void {
+    $this->py->exec("import pandas as pd\nfrom decimal import Decimal\ndf = pd.DataFrame({'amount': [Decimal('1.10')]})");
+
+    expect(fn () => Py::rows($this->py->vars->df))
+        ->toThrow(PyHP\Exception\ConversionException::class, "column 'amount' holds decimal.Decimal values");
+})->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
+
+test('Py::rows needs a DataFrame', function (): void {
+    expect(fn () => Py::rows($this->py->eval('{1, 2}')))
+        ->toThrow(PyHP\Exception\PythonException::class, 'a pandas DataFrame is needed, not a set');
+})->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
+
+test('Py::rows is much faster than to_dict records for big frames', function (): void {
+    $this->py->exec("import numpy as np, pandas as pd\nbig = pd.DataFrame({'g': np.arange(50_000) % 10, 'v': np.arange(50_000) / 7, 's': ['abc'] * 50_000})");
+    $big = $this->py->vars->big;
+
+    $start = hrtime(true);
+    $viaRecords = $big->to_dict('records');
+    $recordsMs = (hrtime(true) - $start) / 1e6;
+    $start = hrtime(true);
+    $viaRows = Py::rows($big);
+    $rowsMs = (hrtime(true) - $start) / 1e6;
+
+    expect($viaRows)->toBe($viaRecords)
+        ->and($rowsMs)->toBeLessThan($recordsMs);
+})->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
