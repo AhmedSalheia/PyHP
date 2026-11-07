@@ -69,7 +69,8 @@ foreach ($nlp->pipe($reviews) as $i => $review) {
 }
 
 // 5. A PHP closure as a pipeline component. Write results through a custom
-//    extension ($doc->_ is a proxy); plain dicts like doc.user_data come back as copies.
+//    extension ($doc->_ is a proxy). Plain dicts like doc.user_data come back as copies;
+//    to write into one, use Py::ref($doc, 'user_data')['key'] = ... instead.
 $py->exec("from spacy.tokens import Doc\nDoc.set_extension('word_count', default=None, force=True)");
 $py->vars->count_words = function (PyObject $doc): PyObject {
     $doc->_->word_count = count(array_filter(

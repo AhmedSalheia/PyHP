@@ -291,6 +291,7 @@ When the last PHP reference to a proxy disappears, the Python object is released
 | `Py::len(PyObject $o): int` | Python `len(o)`. |
 | `Py::repr(PyObject $o): string` | Python `repr(o)`. |
 | `Py::type(PyObject $o): string` | The Python type, e.g. `pandas.DataFrame`, `int`, `__pyhp__.Invoice`. |
+| `Py::ref(PyObject $o, string $attribute): PyObject` | A live proxy to an attribute instead of a copy, so you can change it in place: `Py::ref($doc, 'user_data')['k'] = 'v'`. |
 | `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets and subclasses of dict/list/str/int/float. Throws instead of returning nested proxies. |
 | `Py::rows(PyObject $df): array` | A pandas DataFrame as a list of rows, fast and `json_encode()`-ready; see [Copying tables into PHP](#copying-tables-into-php). |
 | `Py::columns(PyObject $df): array` | The same as one list per column: the most compact copy. |
@@ -378,7 +379,7 @@ $py->vars->{'odd name'};        // any string works as a name
 * Reading a name that doesn't exist throws `PythonException` (`NameError`).
 * Reading falls back to Python builtins, like Python does: `$py->vars->len` is the builtin `len` (as a proxy). `isset()` and `names()` only see your own globals.
 * `names()` and `ref()` are PHP methods. A Python variable called `names` or `ref` is still reachable as a **property**: `$py->vars->names` (no parentheses).
-* **Modifying a copied value in place does nothing in Python**, and PHP warns you: `$py->vars->items[] = 3` gives *"Indirect modification of overloaded property … has no effect"*. Either assign the whole value back (`$py->vars->items = [...]`) or use a proxy: `$py->vars->ref('items')->append(3)`.
+* **Modifying a copied value in place does nothing in Python**, and PHP warns you: `$py->vars->items[] = 3` gives *"Indirect modification of overloaded property … has no effect"*. Either assign the whole value back (`$py->vars->items = [...]`) or use a proxy: `$py->vars->ref('items')->append(3)`. The same goes for attributes of Python objects: `$obj->settings['debug'] = true` changes a copy, `Py::ref($obj, 'settings')['debug'] = true` changes Python's dict.
 
 ### `functions`: Python global callables
 
@@ -732,7 +733,7 @@ $tokens = $doc->to_json()['tokens'];                    // every token, one roun
 * `spacy.blank('en')` gives a tokenizer without downloading a model.
 * Matcher patterns are plain PHP arrays: `[[['LIKE_NUM' => true], ['LOWER' => 'billion']]]`. Match ids are 64-bit unsigned hashes, larger than PHP ints, so they arrive as proxies; pass `as_spans: true` to get spans with `->label_` instead.
 * `$nlp->pipe($texts)` processes many texts in batches; iterate it lazily from PHP.
-* A PHP closure can be a pipeline component (register it with `Language.component(...)` in `exec`, then `$nlp->add_pipe(...)`). To store results on the doc, use a custom extension and write `$doc->_->name = ...`: `$doc->user_data` is a plain dict, so PHP gets a **copy** and `$doc->user_data['k'] = ...` changes nothing in Python.
+* A PHP closure can be a pipeline component (register it with `Language.component(...)` in `exec`, then `$nlp->add_pipe(...)`). To store results on the doc, use a custom extension and write `$doc->_->name = ...`, or write into `user_data` through `Py::ref($doc, 'user_data')['k'] = ...`. Plain `$doc->user_data['k'] = ...` changes nothing in Python: `user_data` is a plain dict, so PHP gets a **copy**.
 * `$spacy->displacy->render($doc, style: 'ent')` returns HTML you can put straight into a page.
 
 Other NLP libraries (NLTK, Hugging Face `transformers`, `sentence-transformers`, `langdetect`, …) follow the same pattern; the main thing to watch is load time, so keep one session alive and load models once.
@@ -1092,9 +1093,8 @@ TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level m
 
 See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Ideas after 0.1.0:
 
-1. `Py::ref($object, 'attribute')`: get an attribute as a proxy instead of a copy, so `Py::ref($doc, 'user_data')['k'] = 'v'` writes into Python.
-2. Convert integer-like numbers (such as SymPy's `Integer`) to PHP ints without losing precision.
-3. More examples and optional test suites for popular libraries.
+1. Convert integer-like numbers (such as SymPy's `Integer`) to PHP ints without losing precision.
+2. More examples and optional test suites for popular libraries.
 
 ## License
 
