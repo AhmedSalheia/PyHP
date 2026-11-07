@@ -8,6 +8,9 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+### Added
+- `ROADMAP.md`: the plan for v0.3.0, v0.4.0 and the goals for v1.0.0.
+
 ## [0.2.0] - 2026-11-07
 
 ### Added

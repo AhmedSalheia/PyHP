@@ -108,6 +108,8 @@ No Python operators on proxies (use `gt`, `mul`, `__and__`, or `eval`). Callback
 
 ## 9. Roadmap
 
+The versioned plan lives in [`ROADMAP.md`](../ROADMAP.md) (v0.3.0, v0.4.0, v1.0.0 goals and a parking lot); the notes below are the history.
+
 Done on 2026-11-07: Windows validation and fixes, imports, `modules`, `classes`, faster bulk data, callbacks study and implementation, MIT license, macOS CI, Windows CI line endings.
 
 Also done: SymPy and spaCy examples and tests (PR #11), pre-commit hook, CI actions on v6.

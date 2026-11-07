@@ -132,6 +132,8 @@ PHP powers a huge part of the web, but the best tools for data analysis, scienti
 
 The design choices follow from that goal: no compiled extension to install, the same code on Linux, Windows and macOS, a context shared between PHP and Python instead of one-off calls, and documentation that is honest about every limitation. It's also meant to be a tool that's enjoyable to build and to use.
 
+The plan for the next versions is in [`ROADMAP.md`](ROADMAP.md).
+
 ## About the author
 
 PyHP is created and maintained by **Ahmed Salheia** ([GitHub](https://github.com/AhmedSalheia)).
