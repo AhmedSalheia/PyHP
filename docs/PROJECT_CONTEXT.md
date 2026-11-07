@@ -116,7 +116,7 @@ Also done: 0.1.1 as `pyhp/pyhp` from `pyhp-php/pyhp` (D24); `vendor/bin/pyhp set
 
 Next:
 
-1. **0.2.0:** release (`pyhp info` is done); switch the sample project to `pyhp setup` as the final check.
+1. **0.2.0** released 2026-11-07 (setup, info, `Py::ref()`, examples 08–11, docs folder). Next: switch the sample project to `pyhp setup` as the final check.
 2. **Must come back to:** Python requirements declared by *other* Composer packages. Libraries built on PyHP (e.g. a future `pyhp/laravel`, or any package that uses spaCy) should declare their own `extra.pyhp.requirements`, and `pyhp setup` should collect them from every installed package (`vendor/composer/installed.json`), merge them with the root project's, and report conflicts. Needs decisions on conflicting versions and on whether the root project can override or exclude them.
 3. Lossless conversion of integer-like numbers (SymPy `Integer`) to PHP int (maybe 0.3.0).
 4. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches, a thread-safe callback mode, a docs website.
