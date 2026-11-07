@@ -80,7 +80,7 @@ That design makes some things easy and some things impossible, and it's worth kn
 **1. Install the package:**
 
 ```bat
-composer require ahmedsalheia/pyhp
+composer require pyhp/pyhp
 ```
 
 To work on a local copy instead (for example to try changes to PyHP itself), add it as a path repository in your project's `composer.json`:
@@ -91,7 +91,7 @@ To work on a local copy instead (for example to try changes to PyHP itself), add
         { "type": "path", "url": "../PyHP" }
     ],
     "require": {
-        "ahmedsalheia/pyhp": "*@dev"
+        "pyhp/pyhp": "*@dev"
     }
 }
 ```

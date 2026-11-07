@@ -42,7 +42,7 @@ Why a socket instead of pipes: PHP on Windows can't `stream_select()` on pipes, 
 
 | # | Decision | Date |
 |---|---|---|
-| D1 | Project name **PyHP** (was PHPy). Composer name placeholder `ahmedsalheia/pyhp`, namespace `PyHP\`. Check availability before publishing. | 2026-11-07 |
+| D1 | Project name **PyHP** (was PHPy). Composer package `pyhp/pyhp` (was `ahmedsalheia/pyhp` for 0.1.0), namespace `PyHP\`. | 2026-11-07 |
 | D2 | Persistent worker + object proxies is the core of the project, not a later add-on. | 2026-11-07 |
 | D3 | A session object exposes **`vars`** (global variables as PHP properties) and **`functions`** (global callables as PHP methods). **`classes`** may be added later. | 2026-11-07 |
 | D4 | **Imports will be designed together** in a later discussion. The MVP has only a minimal `import($module, as:)`. (Superseded by D7.) | 2026-11-07 |
@@ -70,6 +70,7 @@ Why a socket instead of pipes: PHP on Windows can't `stream_select()` on pipes, 
 | D21 | Callbacks only on the thread serving PHP, while PHP waits on a call; background-thread callbacks are out of scope for v1. |
 | D22 | SymPy and spaCy examples with optional Pest suites; CI installs them on Linux only. Merged (PR #11). |
 | D23 | 0.1.0 is released through `release/0.1.0` → `main`; Ahmed's code review happens on that PR, and review fixes are committed to the release branch. |
+| D24 | Everything PyHP lives under one name: Packagist vendor `pyhp`, GitHub organization `pyhp-php` (`pyhp` was taken), repository `pyhp-php/pyhp`. `ahmedsalheia/pyhp` is abandoned on Packagist in favour of `pyhp/pyhp`. Future packages go under the same vendor (e.g. `pyhp/laravel`). |
 
 ## 6. Implemented (as of 2026-11-07)
 
@@ -110,7 +111,7 @@ Also done: SymPy and spaCy examples and tests (PR #11), pre-commit hook, CI acti
 
 Next:
 
-1. **Release 0.1.0** (D23): Ahmed reviews and merges `release/0.1.0` into `main`, tags `v0.1.0`, submits the package to Packagist, back-merges `main` into `develop`.
+1. **Move to the `pyhp` vendor** (D24): transfer the repo to `pyhp-php/pyhp`, merge the rename branch, release 0.1.1, submit `pyhp/pyhp` to Packagist, abandon `ahmedsalheia/pyhp`. Then design `vendor/bin/pyhp setup` with uv (study first).
 2. After 0.1.0: `Py::ref($object, 'attribute')` for writing into attributes that would otherwise be copied; lossless conversion of integer-like numbers (SymPy `Integer`); more library examples.
 3. Later, only if wanted: Laravel integration (service provider, config file), a session pool for long-running workers, `Py::vectorize()` for row-wise PHP callbacks in batches, a thread-safe callback mode.
 
