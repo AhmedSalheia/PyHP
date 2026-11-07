@@ -430,7 +430,7 @@ final class Session
         }
     }
 
-    private function errorFrom(mixed $error): \Throwable
+    private function errorFrom(mixed $error): Throwable
     {
         if (! is_array($error)) {
             return new ProtocolException('The worker reported a failure without details.');
