@@ -400,3 +400,80 @@ def test_calling_a_global_can_require_a_class(session: Session) -> None:
         {"op": "call_global", "name": "make", "kind": "class", "args": [], "kwargs": {}}
     )
     assert error_of(func)["type"] == "TypeError"
+
+
+def frame(session: Session, code: str) -> int:
+    pytest.importorskip("pandas")
+    ok_value(
+        session.handle({"op": "exec", "code": "import pandas as pd\nimport numpy as np\n" + code})
+    )
+    return ref_id(ok_value(session.handle({"op": "get_var_ref", "name": "df"})))
+
+
+def test_table_sends_a_dataframe_column_by_column(session: Session) -> None:
+    df = frame(
+        session,
+        "df = pd.DataFrame({'a': [1, 2], 'b': [0.5, 1.5], 'c': ['x', 'y'], 'd': [True, False]})",
+    )
+    table = ok_value(session.handle({"op": "table", "ref": df}))
+    assert table == {
+        "columns": ["a", "b", "c", "d"],
+        "data": [[1, 2], [0.5, 1.5], ["x", "y"], [True, False]],
+    }
+
+
+def test_table_turns_missing_values_into_null_and_dates_into_iso_strings(session: Session) -> None:
+    df = frame(
+        session,
+        "df = pd.DataFrame({"
+        "'f': [1.5, np.nan], 'o': ['x', None], 'n': pd.array([1, None], dtype='Int64'),"
+        "'t': pd.to_datetime(['2024-01-02 03:04:05', None]),"
+        "'z': pd.to_datetime(['2024-01-02 03:04:05+02:00', None], utc=False),"
+        "'c': pd.Categorical(['a', None]),"
+        "'dt': [pd.Timedelta(seconds=90), None]})",
+    )
+    table = ok_value(session.handle({"op": "table", "ref": df}))
+    assert isinstance(table, dict)
+    data = dict(zip(table["columns"], table["data"], strict=True))
+    assert data["f"] == [1.5, None]
+    assert data["o"] == ["x", None]
+    assert data["n"] == [1, None]
+    assert data["t"] == ["2024-01-02T03:04:05", None]
+    assert data["z"] == ["2024-01-02T03:04:05+02:00", None]
+    assert data["c"] == ["a", None]
+    assert data["dt"] == ["P0DT0H1M30S", None]
+
+
+def test_table_keeps_infinite_floats(session: Session) -> None:
+    df = frame(session, "df = pd.DataFrame({'f': [np.inf, -np.inf]})")
+    response = session.handle({"op": "table", "ref": df})
+    assert response["tagged"] is True
+    assert ok_value(response) == {
+        "columns": ["f"],
+        "data": [[{"$t": "float", "v": "inf"}, {"$t": "float", "v": "-inf"}]],
+    }
+
+
+def test_table_refuses_cells_php_cannot_hold_and_names_the_column(session: Session) -> None:
+    df = frame(
+        session, "from decimal import Decimal\ndf = pd.DataFrame({'price': [Decimal('1.10')]})"
+    )
+    before = len(session.registry)
+    error = error_of(session.handle({"op": "table", "ref": df}))
+    assert error["kind"] == "conversion"
+    assert "price" in str(error["message"])
+    assert len(session.registry) == before
+
+
+def test_table_refuses_duplicate_or_unusable_column_names(session: Session) -> None:
+    df = frame(session, "df = pd.DataFrame([[1, 2]], columns=['a', 'a'])")
+    assert error_of(session.handle({"op": "table", "ref": df}))["kind"] == "conversion"
+    df = frame(session, "df = pd.DataFrame([[1, 2]], columns=[1, '1'])")
+    assert error_of(session.handle({"op": "table", "ref": df}))["kind"] == "conversion"
+
+
+def test_table_needs_a_dataframe(session: Session) -> None:
+    pytest.importorskip("pandas")
+    ok_value(session.handle({"op": "set_var", "name": "l", "value": [1]}))
+    lst = ref_id(ok_value(session.handle({"op": "get_var_ref", "name": "l"})))
+    assert error_of(session.handle({"op": "table", "ref": lst}))["type"] == "TypeError"

@@ -264,3 +264,20 @@ def test_dict_that_must_stay_in_python_does_not_leak_value_references() -> None:
     assert isinstance(result, dict)
     assert result["$t"] == "ref"
     assert len(registry) == 1  # only the dict itself
+
+
+def test_lone_surrogates_inside_containers_still_stay_in_python(registry: Registry) -> None:
+    result = encode(["ok ✓", "\ud800"], registry)
+    assert isinstance(result, list)
+    assert result[0] == "ok ✓"
+    assert isinstance(result[1], dict)
+    assert result[1]["$t"] == "ref"
+
+
+def test_records_with_repeated_keys_keep_every_rule(registry: Registry) -> None:
+    rows = [{"id": i, "1": "x", 2: i / 2} for i in range(3)]
+    assert encode(rows, registry) == [{"id": i, "1": "x", "2": i / 2} for i in range(3)]
+    colliding = [{1: "a", "1": "b"}, {1: "a", "1": "b"}]
+    result = encode(colliding, registry)
+    assert isinstance(result, list)
+    assert all(isinstance(item, dict) and item["$t"] == "ref" for item in result)

@@ -178,6 +178,75 @@ final class Py
         return self::call($object, 'to_php');
     }
 
+    /**
+     * A pandas DataFrame as a list of rows: [['col' => value, ...], ...].
+     *
+     * Faster than $df->to_dict('records') and ready for json_encode(): missing
+     * values (NaN, None, NaT, pd.NA) become null, dates and durations become
+     * ISO 8601 strings, and the index is left out (call ->reset_index() first
+     * to keep it). Columns holding values PHP can't represent (Decimal, date
+     * objects, ...) throw ConversionException; convert them first.
+     *
+     * @return list<array<array-key, mixed>>
+     */
+    public static function rows(PyObject $frame): array
+    {
+        [$names, $data] = self::table($frame);
+        $rows = [];
+        $count = $data === [] ? 0 : count($data[0]);
+        for ($i = 0; $i < $count; $i++) {
+            $row = [];
+            foreach ($names as $position => $name) {
+                $row[$name] = $data[$position][$i];
+            }
+            $rows[] = $row;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * A pandas DataFrame as columns: ['col' => [values...], ...]. Same value
+     * rules as rows(), and the most compact way to copy a table into PHP.
+     *
+     * @return array<array-key, list<mixed>>
+     */
+    public static function columns(PyObject $frame): array
+    {
+        [$names, $data] = self::table($frame);
+
+        return array_combine($names, $data);
+    }
+
+    /**
+     * @return array{0: list<int|string>, 1: list<list<mixed>>}
+     */
+    private static function table(PyObject $frame): array
+    {
+        $table = self::call($frame, 'table');
+        $names = is_array($table) ? ($table['columns'] ?? null) : null;
+        $data = is_array($table) ? ($table['data'] ?? null) : null;
+        if (! is_array($names) || ! is_array($data) || count($names) !== count($data)) {
+            throw new ProtocolException('table returned an unexpected value.');
+        }
+        $checkedNames = [];
+        foreach ($names as $name) {
+            if (! is_int($name) && ! is_string($name)) {
+                throw new ProtocolException('table returned an invalid column name.');
+            }
+            $checkedNames[] = $name;
+        }
+        $checkedData = [];
+        foreach ($data as $column) {
+            if (! is_array($column) || ! array_is_list($column)) {
+                throw new ProtocolException('table returned an invalid column.');
+            }
+            $checkedData[] = $column;
+        }
+
+        return [$checkedNames, $checkedData];
+    }
+
     private static function call(PyObject $object, string $op): mixed
     {
         [$session, $id] = Codec::unwrap($object);

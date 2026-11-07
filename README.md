@@ -231,6 +231,8 @@ When the last PHP reference to a proxy disappears, the Python object is released
 | `Py::repr(PyObject $o): string` | Python `repr(o)`. |
 | `Py::type(PyObject $o): string` | The Python type, e.g. `pandas.DataFrame`, `int`, `__pyhp__.Invoice`. |
 | `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets and subclasses of dict/list/str/int/float. Throws instead of returning nested proxies. |
+| `Py::rows(PyObject $df): array` | A pandas DataFrame as a list of rows, fast and `json_encode()`-ready; see [Copying tables into PHP](#copying-tables-into-php). |
+| `Py::columns(PyObject $df): array` | The same as one list per column: the most compact copy. |
 
 > `Py::config()` does **not** change a default session that is already running. Call `Py::reset()` after changing options if you want the default session to pick them up.
 
@@ -459,7 +461,7 @@ $row['when']->isoformat();    // "2024-01-02"
 ### The pattern
 
 1. **Load and transform inside Python**, through proxies or `exec()`.
-2. **Copy only the small result** to PHP: `->to_dict()`, `->tolist()`, `->item()`, or a scalar like `->sum()`.
+2. **Copy only the result** to PHP: `->to_dict()`, `->tolist()`, `->item()`, a scalar like `->sum()`, or a whole table with [`Py::rows($df)`](#copying-tables-into-php).
 3. **Or don't copy at all**: write a file from Python (`->to_csv()`, `->to_parquet()`) and pass the path around.
 
 ```php
@@ -502,6 +504,32 @@ When a chain gets long or needs lambdas, write that part in Python. Both styles 
 $py->vars->orders = $df;                        // hand a proxy to Python
 $result = $py->eval("orders.assign(net=lambda d: d.revenue * 0.84).nlargest(5, 'net')");
 ```
+
+### Copying tables into PHP
+
+`Py::rows()` and `Py::columns()` are the fast, PHP-friendly way to copy a whole DataFrame:
+
+```php
+$rows = Py::rows($df);        // [['id' => 1, 'price' => 9.5, 'when' => '2024-01-02T03:04:05'], ...]
+$cols = Py::columns($df);     // ['id' => [1, 2, ...], 'price' => [9.5, null, ...], ...]
+echo json_encode($rows);      // works: no NAN, no proxies
+```
+
+They differ from `to_dict()` on purpose, to give you data PHP can use directly:
+
+| In the DataFrame | `to_dict()` gives | `Py::rows()` / `Py::columns()` give |
+|---|---|---|
+| `NaN`, `None`, `pd.NA`, `NaT` | `NAN` / `null` / proxies | `null` |
+| datetime (`datetime64`, with or without time zone) | `Timestamp` proxies | ISO 8601 string, e.g. `2024-01-02T03:04:05+02:00` |
+| timedelta | `Timedelta` proxies | ISO 8601 duration, e.g. `P0DT0H1M30S` |
+| categorical | values | values |
+| `±inf` | `INF` / `-INF` | `INF` / `-INF` (still not valid JSON) |
+| the index | included with `orient='index'` etc. | **left out**; call `->reset_index()` first to keep it |
+| `Decimal`, `date`, other objects | proxies, one per cell | `ConversionException` naming the column; convert it first, e.g. `$df['amount'] = $df['amount']->astype('float')` |
+
+* Column names must be strings or integers that stay distinct as PHP array keys (`'1'` and `1` collide in PHP); otherwise you get a `ConversionException`. Rename first, e.g. flatten a MultiIndex.
+* A `Series` isn't accepted: use `$series->tolist()` or `Py::rows($series->to_frame())`.
+* Floats are exact (no rounding), unlike pandas' own `to_json()`.
 
 ### Missing values and dates
 
@@ -595,35 +623,26 @@ Measured with [`benchmarks/overhead.php`](benchmarks/overhead.php). Run it yours
 | `import pandas` (first time in a session) | ~190 ms | ~330 ms |
 | 1,000,000-row `groupby().mean().to_dict()` via 4 proxy calls | ~16 ms | ~16 ms |
 | …the same as one `eval()` | ~9 ms | ~13 ms |
-| Copy 100,000 rows × 2 columns to PHP (`to_dict('records')`) | ~400 ms | ~630 ms |
 | `close()` with pandas loaded | ~72 ms | ~73 ms |
+
+Copying a 100,000-row × 4-column DataFrame into PHP (Linux):
+
+| Method | Time | PHP memory peak | PHP result |
+|---|---|---|---|
+| `$df->to_dict('records')` | ~610 ms | ~60 MB | list of rows, 53 MB |
+| [`Py::rows($df)`](#copying-tables-into-php) | ~240 ms | ~49 MB | list of rows, 41 MB |
+| [`Py::columns($df)`](#copying-tables-into-php) | ~180 ms | ~16 MB | one list per column, 11 MB |
 
 What that means:
 
 * **Per-call overhead is negligible for DataFrame-level work.** Going through 4 proxies instead of one Python expression costs a few milliseconds on a 1M-row groupby.
 * **Per-call overhead dominates chatty code.** 10,000 attribute reads ≈ 1 s. Don't loop over rows from PHP; let pandas/NumPy do it, or write the loop in Python.
-* **Copying is the expensive part, in time and in memory.** Data travels as JSON, and the PHP copy of a table is several times bigger than the DataFrame: 100k rows × 4 columns take about **53 MB** as PHP arrays, with a peak of about 60 MB while decoding. PHP's default `memory_limit` of 128 MB (on Windows `php.ini`) is reached at roughly 200k rows of that shape. Copy summaries, not datasets; for large outputs, write a file from Python (`to_csv`, `to_parquet`).
-* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call. Python itself starts more slowly on Windows (~110 ms on the test machine vs ~13 ms on Linux).
+* **Copying is the expensive part, in time and in memory.** Data travels as JSON, and PHP arrays are much bigger than a DataFrame. Use `Py::rows()`/`Py::columns()` for tables (2.5–3.5× faster than `to_dict('records')`; columns need a quarter of the memory), copy summaries rather than datasets, and for very large outputs write a file from Python (`to_csv`, `to_parquet`). PHP's default `memory_limit` of 128 MB (Windows `php.ini`) holds roughly 250k rows × 4 columns as rows, or over 1M as columns.
+* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call. Python itself starts more slowly on Windows (~120 ms on the test machine vs ~13 ms on Linux).
 
 The per-call figure is in line with other process-based bridges. In-process embedding (swoole/phpy) is far faster per call; see [the comparison](#pyhp-vs-swoolephpy).
 
----|---|
-| Start a session (no imports) | ~37 ms |
-| One round trip (`eval('1')`, attribute read, method call) | ~70–100 µs |
-| `import pandas` (first time in a session) | ~210 ms |
-| `groupby().mean().to_dict()` on 1,000,000 rows via 4 proxy calls | ~17 ms |
-| …the same as one `eval()` | ~10 ms |
-| Copy 100,000 rows to PHP with `to_dict('records')` | ~900 ms |
-| `close()` with pandas loaded | ~70 ms |
-
-What that means:
-
-* **Per-call overhead is negligible for DataFrame-level work.** Calling pandas through 4 proxies instead of one Python expression cost ~7 ms on a 1M-row groupby.
-* **Per-call overhead dominates chatty code.** 10,000 attribute reads ≈ 1 s. Don't loop over rows from PHP; let pandas/NumPy do it, or write the loop in Python.
-* **Copying is the expensive part.** Data goes through JSON. Copy summaries, not datasets. For large outputs, write a file from Python.
-* **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call.
-
-The per-call figure is in line with other process-based bridges. In-process embedding (swoole/phpy) is far faster per call; see [the comparison](#pyhp-vs-swoolephpy).
+**Why not Apache Arrow/Parquet for transfers?** Reading Arrow in PHP needs a compiled extension or a slow pure-PHP reader, which would break PyHP's "just `composer require`" promise. Column-wise JSON plus a faster conversion walk gets most of the gain with nothing extra to install. If you need Arrow/Parquet, write the file from Python (`$df->to_parquet($path)`) and read it with your own tools.
 
 ---
 
@@ -734,7 +753,7 @@ Yes, by Python itself, and only within a session:
 18. Python ints beyond 64 bits, sets, dates, Decimals, `pd.NA`/`NaT` and subclasses of built-ins stay proxies.
 19. PHP objects (`DateTime`, enums, DTOs) and resources can't be sent; convert them first.
 20. Non-UTF-8 PHP strings become `bytes`; Python `bytes` come back as plain strings.
-21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default).
+21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default); `Py::rows()`/`Py::columns()` are the fastest way to copy tables.
 
 **Output and diagnostics**
 
@@ -849,7 +868,7 @@ See [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) for the full plan. Next
 
 1. **Verify on Windows**, then fix whatever it finds.
 2. ~~Imports, `modules` and `classes`~~ — done.
-3. **Faster bulk data** for tables.
+3. ~~Faster bulk data~~ — done (`Py::rows()`, `Py::columns()`, faster conversion).
 4. **PHP callbacks** (`df.apply($phpClosure)`) — see the [feasibility study](studies/php-callbacks.md).
 5. **macOS CI.**
 6. Packagist release, after a code review and choosing a license.
