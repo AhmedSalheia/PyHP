@@ -77,6 +77,7 @@ test('invalid option values are rejected', function (array $options, string $mes
     'non-string path' => [['paths' => [1]], 'paths'],
     'zero batch size' => [['iter_batch_size' => 0], 'iter_batch_size'],
     'wrong type' => [['timeout' => 'soon'], 'timeout'],
+    'restart not a bool' => [['restart' => 'yes'], 'restart'],
 ]);
 
 test('the platform default interpreter is python on Windows and python3 elsewhere', function (): void {

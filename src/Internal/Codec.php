@@ -7,6 +7,7 @@ namespace PyHP\Internal;
 use Closure;
 use PyHP\Exception\ConversionException;
 use PyHP\Exception\ProtocolException;
+use PyHP\Exception\StaleProxyException;
 use PyHP\PyObject;
 use PyHP\Session;
 use PyHP\Value\Dict;
@@ -32,7 +33,7 @@ final class Codec
     private const JSON_ENCODE_FLAGS = JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE
         | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_INVALID_UTF8_SUBSTITUTE;
 
-    /** @var (Closure(PyObject): array{0: Session, 1: int})|null */
+    /** @var (Closure(PyObject): array{0: Session, 1: int, 2: int})|null */
     private static ?Closure $unwrap = null;
 
     public function __construct(private readonly Session $session) {}
@@ -180,12 +181,16 @@ final class Codec
         // Read the proxy's private fields without giving PyObject any public
         // method that could hide a Python attribute of the same name.
         self::$unwrap ??= Closure::bind(
-            static fn (PyObject $proxy): array => [$proxy->session, $proxy->id],
+            static fn (PyObject $proxy): array => [$proxy->session, $proxy->id, $proxy->generation],
             null,
             PyObject::class,
         );
+        [$session, $id, $generation] = (self::$unwrap)($object);
+        if ($generation !== $session->generation()) {
+            throw StaleProxyException::restarted();
+        }
 
-        return (self::$unwrap)($object);
+        return [$session, $id];
     }
 
     /**

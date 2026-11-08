@@ -8,6 +8,7 @@ use Closure;
 use PyHP\Exception\ConversionException;
 use PyHP\Exception\MessageTooLargeException;
 use PyHP\Exception\ProtocolException;
+use PyHP\Exception\PyHPException;
 use PyHP\Exception\PythonException;
 use PyHP\Exception\SessionClosedException;
 use PyHP\Internal\Codec;
@@ -71,6 +72,15 @@ final class Session
 
     /** How many requests are in progress (more than one while callbacks call Python). */
     private int $requestDepth = 0;
+
+    /** Counts workers: proxies remember theirs, so ones from before a restart are refused. */
+    private int $generation = 1;
+
+    /** True after close(): an explicitly closed session is never restarted. */
+    private bool $closed = false;
+
+    /** @var list<Closure(Session): mixed> run after every worker start; see onStart() */
+    private array $startHooks = [];
 
     public function __construct(private readonly Config $config = new Config)
     {
@@ -178,9 +188,70 @@ final class Session
         ];
     }
 
+    /**
+     * Registers a hook that prepares the session (imports, models, variables): it runs
+     * now, and again whenever the worker is restarted (see the "restart" option).
+     *
+     * @param  Closure(Session): mixed  $hook
+     */
+    public function onStart(Closure $hook): self
+    {
+        $this->startHooks[] = $hook;
+        if ($this->isOpen()) {
+            $hook($this);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Replaces the worker with a fresh one and runs the onStart hooks. Everything in
+     * the old worker is gone; proxies to it throw StaleProxyException from now on.
+     */
+    public function restart(): void
+    {
+        if ($this->requestDepth > 0) {
+            throw new PyHPException('A session can\'t restart while a call is running (for example from a PHP callback).');
+        }
+        $this->worker?->stop();
+        $this->worker = null;
+        $this->pendingReleases = [];
+        $this->callbacks = [];
+        $this->callbackIds = [];
+        $this->closed = false;
+        $this->generation++;
+        $this->worker = Worker::start($this->config);
+        foreach ($this->startHooks as $hook) {
+            $hook($this);
+        }
+    }
+
+    /** True when the worker answers a ping; restarts it first if the "restart" option allows. */
+    public function ping(): bool
+    {
+        try {
+            $this->request('ping');
+
+            return true;
+        } catch (PyHPException) {
+            return false;
+        }
+    }
+
+    /**
+     * The worker generation proxies belong to.
+     *
+     * @internal Used by PyObject and Codec.
+     */
+    public function generation(): int
+    {
+        return $this->generation;
+    }
+
     /** Stop the Python process. All proxies from this session become unusable. */
     public function close(): void
     {
+        $this->closed = true;
         $this->worker?->stop();
         $this->worker = null;
         $this->pendingReleases = [];
@@ -197,6 +268,10 @@ final class Session
      */
     public function request(string $op, array $fields = []): mixed
     {
+        if ($this->config->restart && ! $this->closed && $this->requestDepth === 0
+            && ($this->worker === null || ! $this->worker->isRunning())) {
+            $this->restart();
+        }
         $worker = $this->runningWorker();
 
         $releases = $this->pendingReleases;
@@ -402,9 +477,9 @@ final class Session
      *
      * @internal
      */
-    public function release(int $id): void
+    public function release(int $id, int $generation): void
     {
-        if ($this->worker !== null) {
+        if ($this->worker !== null && $generation === $this->generation) {
             $this->pendingReleases[] = $id;
         }
     }
