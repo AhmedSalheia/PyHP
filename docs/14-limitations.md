@@ -8,9 +8,9 @@
 2. One call at a time per session. Not thread-safe; don't share sessions across forks.
 3. Every proxy operation is a round trip (~0.1 ms on Linux).
 4. Sessions can't outlive their PHP process. Under PHP-FPM, every request pays start-up and import time.
-5. Timeouts kill the worker and lose all session state. Running Python calls can't be interrupted gently.
+5. Timeouts kill the worker and lose all session state. Running Python calls can't be interrupted gently. With the `restart` option the next call gets a fresh worker and your `onStart` hooks rebuild the state, but the call that timed out still fails.
 6. Child processes started by your Python code are not killed with the worker.
-7. No automatic restart or retry.
+7. No automatic retry: after a crash or timeout the failed call throws; only the next call restarts the worker (`restart` option).
 
 **Syntax gaps**
 

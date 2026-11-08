@@ -31,9 +31,10 @@ Everything PyHP throws extends `PyHP\Exception\PyHPException`.
 | `MessageTooLargeException` | A request or result is bigger than `max_message_bytes`. | ✅ still usable |
 | `ConfigException` | Invalid option (unknown key, wrong type, bad value). | n/a: thrown before starting |
 | `WorkerStartException` | Python couldn't be started: interpreter not found, crashed during start-up (e.g. Python < 3.10), didn't connect within `startup_timeout`. The message includes the exit code and the worker log. | n/a: never started |
-| `TimeoutException` | One call took longer than `timeout`. **The worker is killed** because a running Python call can't be interrupted safely. | ❌ closed, all state lost |
-| `WorkerCrashedException` | The worker process died: `os._exit()`, a segfault in a native library, killed by the OS (out of memory). The message includes the log tail. | ❌ closed |
-| `SessionClosedException` | You used a session, or a proxy, after `close()` or after a crash or timeout. | ❌ closed |
+| `TimeoutException` | One call took longer than `timeout`. **The worker is killed** because a running Python call can't be interrupted safely. | ❌ closed, all state lost; with `restart`, the next call gets a fresh worker |
+| `WorkerCrashedException` | The worker process died: `os._exit()`, a segfault in a native library, killed by the OS (out of memory). The message includes the log tail. | ❌ closed; with `restart`, the next call gets a fresh worker |
+| `SessionClosedException` | You used a session, or a proxy, after `close()`, or after a crash or timeout without the `restart` option. | ❌ closed |
+| `StaleProxyException` | You used a proxy from before the session restarted its worker (crash, timeout or `restart()`): the object no longer exists. | ✅ still usable; get the object again |
 | `ProtocolException` | PHP and the worker disagree about the wire format, usually because the PHP and Python halves of PyHP come from different versions. | ❌ closed |
 
 Notes:

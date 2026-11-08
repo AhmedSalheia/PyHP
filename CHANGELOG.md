@@ -8,6 +8,14 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+### Added
+- Worker recovery: the `restart` option starts a fresh worker on the next call after a crash or timeout (the failed call still throws); `Session::onStart()` registers hooks that rebuild the session's state now and after every restart; `Session::restart()` resets a session on purpose; `Session::ping()` is a cheap health check.
+- `Py::shared($name, $setup)`: one long-lived, self-healing session per name for queue workers and app servers, and `Py::closeShared()`.
+- `StaleProxyException`: proxies from before a restart are refused, instead of reaching unrelated objects in the new worker; their releases are dropped so they can't free objects in it.
+
+### Fixed
+- `pyhp lock` and `pyhp setup` no longer try to delete temporary or half-written files that don't exist (it raised a PHP warning on Windows when a resolution failed).
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

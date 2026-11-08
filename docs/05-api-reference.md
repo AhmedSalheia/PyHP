@@ -11,6 +11,8 @@
 | `Py::session(array $overrides = []): Session` | A new independent session. `$overrides` apply to this session only. |
 | `Py::default(): Session` | A shared default session, started on first use and restarted automatically if it was closed. |
 | `Py::reset(bool $forgetConfig = false)` | Close the default session. With `forgetConfig: true` also go back to default options. |
+| `Py::shared(string $name = 'default', ?Closure $setup = null, array $overrides = []): Session` | One long-lived session per name for this PHP process, with `restart` on and `$setup` as its `onStart` hook. Later calls return the same session. See [Long-running PHP](13-deployment-and-security.md#long-running-php-recovery-and-shared-sessions). |
+| `Py::closeShared(?string $name = null)` | Close and forget one shared session, or all of them. |
 | `Py::exec()`, `Py::execFile()`, `Py::eval()`, `Py::import()`, `Py::vars()`, `Py::functions()`, `Py::modules()`, `Py::classes()` | Shortcuts to the same methods on `Py::default()`. |
 | `Py::tuple(...$items)` | A value sent as a Python `tuple`. |
 | `Py::slice($start, $stop = null, $step = null)` | A value sent as a Python `slice`: `Py::slice(1, 3)` is `1:3`, `Py::slice(null, null, -1)` is `::-1`. |
@@ -42,6 +44,7 @@ Use these keys with `Py::config()`, `Py::session()` and `Config::fromArray()`. U
 | `max_message_bytes` | int | 64 MiB | Largest request or result allowed. Protects PHP from accidentally copying huge data. Minimum 1024. |
 | `log_file` | string\|null | `null` (temp file) | Where the worker's stderr goes. A temp file is deleted when the session closes; set a path to keep it. |
 | `iter_batch_size` | int | `100` | Items fetched per round trip in `foreach`. |
+| `restart` | bool | `false` | After a crash or timeout, start a fresh worker on the next call and run the `onStart` hooks, instead of leaving the session closed. |
 
 Precedence: built-in defaults → `Py::config()` → `Py::session([...])` overrides.
 
@@ -63,6 +66,9 @@ You can also build a `Config` directly with named arguments: `new Session(new Co
 | `log(): string` | Everything the worker wrote to stderr so far (warnings, crash output). |
 | `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `callbacks` (PHP closures Python holds), `pid`. |
 | `isOpen(): bool` | Whether the worker is running. |
+| `ping(): bool` | Whether the worker answers a request (restarting it first when `restart` is on). |
+| `onStart(Closure $hook): self` | Runs `$hook($session)` now and after every restart: put imports, models and variables the session needs here. |
+| `restart(): void` | Replace the worker with a fresh one and run the `onStart` hooks. Proxies from before throw `StaleProxyException`. Not allowed inside a PHP callback. |
 | `close(): void` | Stop the worker. Safe to call twice. Also happens automatically when the session object is destroyed. |
 | `config(): Config` | The session's configuration. |
 

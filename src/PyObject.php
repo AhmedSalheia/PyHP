@@ -9,6 +9,7 @@ use Generator;
 use IteratorAggregate;
 use LogicException;
 use PyHP\Exception\ProtocolException;
+use PyHP\Exception\StaleProxyException;
 use Stringable;
 
 /**
@@ -41,26 +42,31 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
     /**
      * @internal Proxies are created by PyHP when Python returns an object.
      */
+    /** The worker generation this object lives in; see Session::restart(). */
+    private readonly int $generation;
+
     public function __construct(
         private readonly Session $session,
         private readonly int $id,
         private readonly string $type,
-    ) {}
+    ) {
+        $this->generation = $session->generation();
+    }
 
     public function __destruct()
     {
-        $this->session->release($this->id);
+        $this->session->release($this->id, $this->generation);
     }
 
     public function __get(string $name): mixed
     {
-        return $this->session->request('getattr', ['ref' => $this->id, 'name' => $name]);
+        return $this->session->request('getattr', ['ref' => $this->ref(), 'name' => $name]);
     }
 
     public function __set(string $name, mixed $value): void
     {
         $this->session->request('setattr', [
-            'ref' => $this->id,
+            'ref' => $this->ref(),
             'name' => $name,
             'value' => $this->session->codec()->encode($value),
         ]);
@@ -68,12 +74,12 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
 
     public function __isset(string $name): bool
     {
-        return $this->session->request('hasattr', ['ref' => $this->id, 'name' => $name]) === true;
+        return $this->session->request('hasattr', ['ref' => $this->ref(), 'name' => $name]) === true;
     }
 
     public function __unset(string $name): void
     {
-        $this->session->request('delattr', ['ref' => $this->id, 'name' => $name]);
+        $this->session->request('delattr', ['ref' => $this->ref(), 'name' => $name]);
     }
 
     /**
@@ -87,7 +93,7 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
     {
         return $this->session->request(
             'call_method',
-            ['ref' => $this->id, 'name' => $name] + $this->session->codec()->encodeArguments($arguments),
+            ['ref' => $this->ref(), 'name' => $name] + $this->session->codec()->encodeArguments($arguments),
         );
     }
 
@@ -95,14 +101,14 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
     {
         return $this->session->request(
             'call',
-            ['ref' => $this->id] + $this->session->codec()->encodeArguments($arguments),
+            ['ref' => $this->ref()] + $this->session->codec()->encodeArguments($arguments),
         );
     }
 
     public function offsetGet(mixed $offset): mixed
     {
         return $this->session->request('getitem', [
-            'ref' => $this->id,
+            'ref' => $this->ref(),
             'key' => $this->session->codec()->encode($offset),
         ]);
     }
@@ -116,7 +122,7 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
             return;
         }
         $this->session->request('setitem', [
-            'ref' => $this->id,
+            'ref' => $this->ref(),
             'key' => $this->session->codec()->encode($offset),
             'value' => $this->session->codec()->encode($value),
         ]);
@@ -126,7 +132,7 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
     public function offsetExists(mixed $offset): bool
     {
         return $this->session->request('hasitem', [
-            'ref' => $this->id,
+            'ref' => $this->ref(),
             'key' => $this->session->codec()->encode($offset),
         ]) === true;
     }
@@ -134,7 +140,7 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
     public function offsetUnset(mixed $offset): void
     {
         $this->session->request('delitem', [
-            'ref' => $this->id,
+            'ref' => $this->ref(),
             'key' => $this->session->codec()->encode($offset),
         ]);
     }
@@ -147,7 +153,7 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
      */
     public function getIterator(): Generator
     {
-        $iterator = $this->session->request('iter', ['ref' => $this->id]);
+        $iterator = $this->session->request('iter', ['ref' => $this->ref()]);
         if (! $iterator instanceof self) {
             throw new ProtocolException('iter did not return an iterator reference.');
         }
@@ -166,9 +172,19 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
         } while (($batch['done'] ?? true) !== true);
     }
 
+    /** The object's id in the worker, after checking that worker is still the one that created it. */
+    private function ref(): int
+    {
+        if ($this->generation !== $this->session->generation()) {
+            throw StaleProxyException::restarted();
+        }
+
+        return $this->id;
+    }
+
     public function __toString(): string
     {
-        $text = $this->session->request('str', ['ref' => $this->id]);
+        $text = $this->session->request('str', ['ref' => $this->ref()]);
 
         return is_string($text) ? $text : '';
     }

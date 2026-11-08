@@ -8,8 +8,9 @@ Goal: make Python's libraries (data analysis, science, NLP, machine learning, an
 | 2 | New home | v0.1.1 | released 2026-11-07 | Package renamed to `pyhp/pyhp`, repository moved to `pyhp-php/pyhp`. |
 | 3 | Tooling | v0.2.0 | released 2026-11-07 | `pyhp setup` (uv or venv/pip), `pyhp info`, automatic `.venv` detection, `Py::ref()`, examples 06–11, numbered docs. |
 | 4 | Ecosystem and data fidelity | v0.3.0 | released 2026-11-08 | Python requirements declared by any Composer package, exact environments, lossless numbers, real-world setup tests. |
-| 5 | Long-running PHP and frameworks | v0.4.0 | in progress | Worker reuse and recovery for queue workers and app servers, live output, faster callbacks, a Laravel package. |
-| 6 | Stable | v1.0.0 | goal | Frozen public API and protocol, documented guarantees, docs website, proven in production. |
+| 5 | Long-running PHP | v0.4.0 | in progress | Worker recovery, shared sessions for queue workers and app servers, live output, faster callbacks. |
+| 6 | Laravel | pyhp/laravel v0.1.0 | planned | A separate package built on 0.4: service provider, config, facade, artisan commands. |
+| 7 | Stable | v1.0.0 | goal | Frozen public API and protocol, documented guarantees, docs website, proven in production. |
 
 ## v0.3.0: Ecosystem and data fidelity
 
@@ -24,15 +25,15 @@ PyHP becomes something other packages can build on, and values cross the bridge 
 4. **Real-world setup tests in CI.** A job on Linux, Windows and macOS runs `pyhp setup` (with uv, and with `--no-uv`) in a small sample project, then checks that a session uses the new venv and that `pyhp info` exits 0.
 5. **An official starter project.** The `pyhp-sample` project, polished into a template people can copy: `composer.json` with `extra.pyhp`, a small service class, tests.
 
-## v0.4.0: Long-running PHP and frameworks
+## v0.4.0: Long-running PHP
 
 PyHP becomes comfortable in production setups where PHP processes live for a long time.
 
-1. **Worker recovery.** An option to restart a crashed or timed-out worker automatically, with a hook to rebuild session state (imports, loaded models). `Session::isAlive()` and a cheap health check.
-2. **Session reuse.** A small pool or a "shared session per process" helper for queue workers, Laravel Octane, RoadRunner and FrankenPHP, so expensive imports and models load once per process instead of once per job. Clear rules for what is safe to share.
+1. **Worker recovery.** An opt-in `restart` option: after a crash or timeout the failed call still throws, and the next call starts a fresh worker and runs the `onStart` hooks that rebuild session state (imports, loaded models). `Session::restart()` and `Session::ping()`.
+2. **Session reuse.** `Py::shared($name, $setup)`: one self-healing session per process and name for queue workers, Laravel Octane, RoadRunner and FrankenPHP, so expensive imports and models load once per process instead of once per job. A session pool can follow if someone needs it.
 3. **Live output.** Optionally stream what Python prints to PHP while a call runs (a callback), instead of only when it ends. Useful for long jobs and progress bars.
 4. **Faster callbacks.** `Py::vectorize()`: a PHP closure applied to a whole column or array in batches, one round trip per batch instead of per value.
-5. **`pyhp/laravel`.** A separate package: service provider, config file, facade, `php artisan pyhp:setup` and `pyhp:info`, and session lifetime that matches the request or the worker. It uses v0.3's per-package requirements.
+`pyhp/laravel` moved to its own release right after 0.4.0 (decided 2026-11-08): a separate package with a service provider, config file, facade, `php artisan pyhp:setup` and `pyhp:info`, and session lifetime that matches the request or the worker, built on 0.4's shared sessions and 0.3's per-package requirements.
 
 ## v1.0.0: Stable
 
