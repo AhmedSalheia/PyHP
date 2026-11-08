@@ -34,7 +34,7 @@
 
 **Output and diagnostics**
 
-22. Printed output arrives when the call ends, not live.
+22. Live output arrives per line (or per explicit flush), not per character; text printed by background threads during a call waits for the main thread's next line.
 23. `input()` can't read anything.
 24. Output from background threads between calls goes to the log, not to PHP.
 

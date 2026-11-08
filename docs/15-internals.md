@@ -24,7 +24,9 @@
 6. **Timeouts:** PHP waits with `stream_select()` against one deadline per call. On expiry the worker is killed.
 7. **Callbacks:** while Python handles a request it may send `{"op": "php_call", "seq": 1, "cb": 3, "args": [...], "kwargs": {...}}` instead of a response. PHP runs closure #3 (closures travel as `{"$t": "callback", "id": 3}`), pauses the deadline meanwhile, and answers `{"op": "php_return", "seq": 1, "ok": true, "value": ...}`. While Python waits for that answer, PHP may send ordinary requests (the closure calling Python), which Python serves first. Closures Python drops are reported in `"release_callbacks"`.
 
-The protocol is versioned (`protocol: 2` since callbacks). A mismatch between PHP and Python halves fails at the handshake.
+8. **Live output:** when a request asks for it (`"stream": true`, set in echo mode or with `onOutput`), the worker also sends `{"op": "output", "text": …}` frames while it runs, at each newline or flush, up to 16 K characters each. PHP hands them to the output handler and keeps waiting; the remainder travels in the response's `out`.
+
+The protocol is versioned (`protocol: 3` since live output; 2 added callbacks). A mismatch between PHP and Python halves fails at the handshake.
 
 ## PyHP vs. swoole/phpy
 

@@ -40,9 +40,11 @@ import weakref
 from collections.abc import Callable, Iterable, Iterator
 from typing import Final, Protocol, TypeAlias, cast
 
-PROTOCOL_VERSION: Final = 2
+PROTOCOL_VERSION: Final = 3
 # How deep PHP -> Python -> PHP -> ... callbacks may nest.
 MAX_CALLBACK_DEPTH: Final = 32
+# Most characters sent in one live output frame.
+OUTPUT_CHUNK: Final = 16 * 1024
 # Module that Python code imports PyHP's own types from: `from pyhp import PhpError`.
 PUBLIC_MODULE: Final = "pyhp"
 INT64_MIN: Final = -(2**63)
@@ -515,6 +517,46 @@ class Bridge(Protocol):
     def receive(self) -> Request | None: ...
 
 
+class _LiveOutput(io.StringIO):
+    """stdout during a streamed call: sends finished lines to PHP while the call runs.
+
+    Only the thread that serves PHP writes to the socket; text printed by other
+    threads waits here until that thread sends next, or until the response.
+    """
+
+    def __init__(self, bridge: Bridge, thread: int) -> None:
+        super().__init__()
+        self._bridge = bridge
+        self._thread = thread
+        self._pending: list[str] = []
+        self._lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        with self._lock:
+            self._pending.append(text)
+        if "\n" in text and threading.get_ident() == self._thread:
+            self._send(whole_lines=True)
+        return len(text)
+
+    def flush(self) -> None:
+        if threading.get_ident() == self._thread:
+            self._send(whole_lines=False)
+
+    def getvalue(self) -> str:
+        """What hasn't been sent yet; it travels with the response."""
+        with self._lock:
+            return "".join(self._pending)
+
+    def _send(self, *, whole_lines: bool) -> None:
+        with self._lock:
+            text = "".join(self._pending)
+            cut = text.rfind("\n") + 1 if whole_lines else len(text)
+            ready, rest = text[:cut], text[cut:]
+            self._pending = [rest] if rest else []
+        for start in range(0, len(ready), OUTPUT_CHUNK):
+            self._bridge.send_call({"op": "output", "text": ready[start : start + OUTPUT_CHUNK]})
+
+
 class PhpCallable:
     """A PHP closure that Python code can call like a function."""
 
@@ -602,7 +644,12 @@ class Session:
         return self._with_releases(self._handle(request))
 
     def _handle(self, request: Request) -> Response:
-        output = io.StringIO()
+        bridge = self.bridge
+        output = (
+            _LiveOutput(bridge, self._thread)
+            if request.get("stream") is True and bridge is not None
+            else io.StringIO()
+        )
         try:
             release = request.get("release", [])
             self.registry.release(

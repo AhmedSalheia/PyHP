@@ -12,6 +12,10 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - Worker recovery: the `restart` option starts a fresh worker on the next call after a crash or timeout (the failed call still throws); `Session::onStart()` registers hooks that rebuild the session's state now and after every restart; `Session::restart()` resets a session on purpose; `Session::ping()` is a cheap health check.
 - `Py::shared($name, $setup)`: one long-lived, self-healing session per name for queue workers and app servers, and `Py::closeShared()`.
 - `StaleProxyException`: proxies from before a restart are refused, instead of reaching unrelated objects in the new worker; their releases are dropped so they can't free objects in it.
+- Live output: what Python prints reaches PHP while a call runs, about a line at a time. `Session::onOutput()` sends it to a callback (progress bars, logs) instead of echoing or capturing it.
+
+### Changed
+- Echo mode (the default) prints Python's output live while the call runs instead of all at once when it ends. Wire protocol version 3.
 
 ### Fixed
 - `pyhp lock` and `pyhp setup` no longer try to delete temporary or half-written files that don't exist (it raised a PHP warning on Windows when a resolution failed).
