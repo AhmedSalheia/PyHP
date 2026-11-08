@@ -11,6 +11,10 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ### Added
 - Real-world tests of `pyhp setup` in CI (`tests/smoke/setup-smoke.php`): on Linux, Windows and macOS, with uv (downloading Python) and with the system Python, a fresh Composer project installs PyHP, runs `pyhp setup` twice and `pyhp info`, and checks that a session runs in the new venv.
 - `TASKS.md`: the tasks of the current scope.
+- Python requirements declared by installed Composer packages: any package can list them in its own `extra.pyhp.requirements` (a list or a requirements file), and `pyhp setup` collects them from `vendor/composer/installed.json` and installs them with the project's own. `setup` and `pyhp info` show which package asked for what.
+- `extra.pyhp.ignore-packages` skips a Composer package's Python requirements; `extra.pyhp.overrides` forces versions over everyone else's rules (uv only; with pip, `setup` stops with an explanation).
+- When the installer can't satisfy every rule, `pyhp setup` lists each Python package requested by more than one source and the Composer packages behind each rule.
+- `config.vendor-dir` in `composer.json` is respected when looking for installed packages.
 
 ### Changed
 - Whole numbers that aren't Python `int` (`sympy.Integer`, anything registered as `numbers.Integral`) now arrive in PHP as `int` when they fit in 64 bits, instead of as proxies: `solve()` returns `[2, 3]` and `$py->functions->int()` isn't needed. Larger values, `int` subclasses (`IntEnum`), fractions and high-precision floats still stay proxies.

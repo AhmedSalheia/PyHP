@@ -28,6 +28,8 @@ Settings, all optional, under `extra.pyhp` in `composer.json`:
 | `python` | uv's or the system's choice | Python version for the environment, like `"3.12"`. |
 | `requirements` | `requirements.txt` if it exists | A list of packages in pip syntax (`["pandas>=2", "spacy==3.8.*"]`), or the path of a requirements file (`"python/requirements.txt"`). |
 | `venv` | `.venv` | Folder of the environment, relative to the project root or absolute. |
+| `ignore-packages` | none | Composer packages whose Python requirements are skipped, like `["acme/heavy-nlp"]`. See [below](#python-requirements-from-composer-packages). |
+| `overrides` | none | Version rules that replace everyone else's, like `["numpy<2"]`. **Needs uv.** |
 
 Options:
 
@@ -41,6 +43,41 @@ Options:
 On Windows, Composer also creates `vendor\bin\pyhp.bat`, so `vendor\bin\pyhp setup` works in Command Prompt and PowerShell.
 
 Setup installs packages; it doesn't remove ones you take out of the list. To start clean, delete the `.venv` folder and run setup again.
+
+## Python requirements from Composer packages
+
+Any Composer package can declare the Python packages it needs, exactly the way your project does, in its own `composer.json`:
+
+```json
+{
+    "name": "acme/text-tools",
+    "require": { "pyhp/pyhp": "^0.3" },
+    "extra": { "pyhp": { "requirements": ["spacy>=3.8"] } }
+}
+```
+
+`pyhp setup` reads every installed package's `extra.pyhp` from `vendor/composer/installed.json`, adds your project's own requirements, and installs everything into one environment. So installing a PHP package built on PyHP is `composer require acme/text-tools` followed by `vendor/bin/pyhp setup`. Nobody has to copy Python requirements around.
+
+* A package can list requirements or name a requirements file inside the package (`"requirements": "python/requirements.txt"`). Package files can't use pip options such as `-r` or `-e`.
+* `setup` prints which package asked for what, and so does `pyhp info`. Any installed package can make `setup` install Python packages, so always check that list, just as you would check what a Composer package runs.
+* Only the root project's `python`, `venv`, `ignore-packages` and `overrides` settings count; packages can only add requirements.
+* PyHP's own `extra.pyhp`, which lists its development tools, is never collected.
+
+**Your project stays in charge:**
+
+| You want to | Do this |
+|---|---|
+| Use a stricter version than a package asks for | Add your own requirement, e.g. `"pandas>=2.2"`. Every rule is passed to the installer, which picks a version that satisfies all of them. |
+| Skip a package's Python requirements | `"ignore-packages": ["acme/heavy-nlp"]`. You then install what it needs yourself, or not at all. |
+| Force a version even if a package forbids it | `"overrides": ["numpy<2"]` replaces every other rule for `numpy`. Needs uv (`uv pip install --override`); with pip, `setup` stops and says so. |
+
+**When the rules can't all be met**, the installer fails. `setup` then lists each Python package that was requested by more than one source, with the Composer packages behind each rule:
+
+```
+These Python packages are requested by more than one source; check that their version rules can all be met:
+  six: six<1.16 (your project), six>=1.16 (acme/text-tools)
+To resolve it, tighten your own requirement, force a version with extra.pyhp.overrides (uv), or skip a package's requirements with extra.pyhp.ignore-packages.
+```
 
 ## `vendor/bin/pyhp info`
 
@@ -56,7 +93,7 @@ It checks everything between your PHP code and Python, in the order PyHP uses it
 |---|---|
 | **PyHP** | The installed PyHP version. |
 | **PHP** | Version, thread safety, 32/64-bit, the `php` binary, the OS, the loaded `php.ini`, and whether `proc_open()` is allowed (PyHP needs it to start Python). |
-| **Project** | The project root, the Python version and packages it asks for in `extra.pyhp` (or `requirements.txt`). |
+| **Project** | The project root, the Python version and packages it asks for in `extra.pyhp` (or `requirements.txt`), the requirements each installed Composer package adds, ignored packages and overrides. |
 | **Python** | The interpreter PyHP will use and **why** (the `PYHP_PYTHON` variable, the project's venv, or the default command), the venv folder, uv's version if installed, Python's version and real executable, each required package with its installed version or `missing`, and a live test: it starts a PyHP worker and times its first answer. |
 | **Problems** | Everything that needs fixing, with the command that fixes it. |
 

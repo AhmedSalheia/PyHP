@@ -35,6 +35,15 @@ final class Installer
         $venv = $config->venvPath($root);
         $python = VirtualEnv::python($venv, $this->osFamily);
         $uv = $useUv ? $this->runner->find('uv') : null;
+        $requirements = ProjectRequirements::collect($root, $config);
+
+        if ($requirements->overrides() !== [] && $uv === null) {
+            $this->say('extra.pyhp.overrides needs uv: pip has no way to override other packages\' version rules. '
+                .'Install uv ('.self::UV_INSTALL_URL.') or remove extra.pyhp.overrides from composer.json.');
+
+            return 1;
+        }
+        $this->describe($requirements);
 
         if (is_file($python)) {
             $this->say("The virtual environment in {$venv} already exists; reusing it.");
@@ -47,15 +56,25 @@ final class Installer
             }
         }
 
-        $packages = $config->requirementsFile !== null ? ['-r', $config->requirementsFile] : $config->requirements;
+        $packages = $requirements->installArguments();
         if ($packages === []) {
             $this->say('No Python packages to install. List them in composer.json under extra.pyhp.requirements '
                 .'(or in requirements.txt), then run pyhp setup again.');
         } else {
+            $overrideFile = $requirements->overrides() === [] ? null : self::temporaryFile($requirements->overrides());
             $install = $uv !== null
-                ? [$uv, 'pip', 'install', '--python', $python, ...$packages]
+                ? [$uv, 'pip', 'install', '--python', $python, ...$packages, ...($overrideFile !== null ? ['--override', $overrideFile] : [])]
                 : [$python, '-m', 'pip', 'install', ...$packages];
-            if (! $this->step($install, $root, $dryRun)) {
+            try {
+                $installed = $this->step($install, $root, $dryRun);
+            } finally {
+                if ($overrideFile !== null) {
+                    @unlink($overrideFile);
+                }
+            }
+            if (! $installed) {
+                $this->explainFailure($requirements);
+
                 return 1;
             }
         }
@@ -66,6 +85,52 @@ final class Installer
         $this->say($dryRun ? 'Dry run: nothing was changed.' : "Done. PyHP will use {$python} automatically.");
 
         return 0;
+    }
+
+    private function describe(ProjectRequirements $requirements): void
+    {
+        foreach ($requirements->ignored() as $package) {
+            $this->say("Skipping the Python requirements of {$package} (extra.pyhp.ignore-packages).");
+        }
+        $fromPackages = $requirements->fromPackages();
+        if ($fromPackages !== []) {
+            $this->say('Python packages requested by your Composer packages:');
+            foreach ($fromPackages as $requirement) {
+                $this->say("  - {$requirement->origin}: {$requirement->spec}");
+            }
+        }
+        if ($requirements->overrides() !== []) {
+            $this->say('Overriding version rules (extra.pyhp.overrides): '.implode(', ', $requirements->overrides()));
+        }
+    }
+
+    private function explainFailure(ProjectRequirements $requirements): void
+    {
+        $shared = $requirements->shared();
+        if ($shared === []) {
+            return;
+        }
+        $this->say('These Python packages are requested by more than one source; check that their version rules can all be met:');
+        foreach ($shared as $name => $list) {
+            $this->say("  {$name}: ".implode(', ', array_map(
+                static fn (Requirement $r): string => "{$r->spec} ({$r->origin})",
+                $list,
+            )));
+        }
+        $this->say('To resolve it, tighten your own requirement, force a version with extra.pyhp.overrides (uv), '
+            .'or skip a package\'s requirements with extra.pyhp.ignore-packages.');
+    }
+
+    /** @param list<string> $lines */
+    private static function temporaryFile(array $lines): string
+    {
+        $file = tempnam(sys_get_temp_dir(), 'pyhp-overrides-');
+        if ($file === false) {
+            throw new \RuntimeException('Could not create a temporary file for extra.pyhp.overrides.');
+        }
+        file_put_contents($file, implode("\n", $lines)."\n");
+
+        return $file;
     }
 
     /** @return list<string>|null */
