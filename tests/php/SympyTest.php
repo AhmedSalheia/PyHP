@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use PyHP\Py;
-use PyHP\PyObject;
 
 /*
  * Optional: runs only when the interpreter under test has SymPy
@@ -26,10 +25,8 @@ test('equations parsed from strings are solved symbolically', function (): void 
     $x = $this->sp->symbols('x');
     $roots = $this->sp->solve($this->sp->sympify('x**2 - 5*x + 6'), $x);
 
-    // SymPy numbers aren't Python ints, so they stay proxies; convert explicitly.
-    expect($roots[0])->toBeInstanceOf(PyObject::class)
-        ->and(Py::type($roots[0]))->toBe('sympy.core.numbers.Integer')
-        ->and(array_map(fn (PyObject $r): int => $this->py->functions->int($r), $roots))->toBe([2, 3]);
+    // sympy.Integer is a whole number, so it arrives as a PHP int.
+    expect($roots)->toBe([2, 3]);
 })->skip(fn () => ! pythonHasModule('sympy'), 'SymPy is not installed');
 
 test('calculus, simplification and LaTeX', function (): void {
@@ -71,7 +68,7 @@ test('lambdify turns an expression into a fast function PHP can call', function 
 test('matrices: determinant, inverse and conversion to floats', function (): void {
     $m = $this->sp->Matrix([[1, 2], [3, 4]]);
 
-    expect($this->py->functions->int($m->det()))->toBe(-2)
+    expect($m->det())->toBe(-2)
         ->and((string) $m->inv())->toBe('Matrix([[-2, 1], [3/2, -1/2]])')
         ->and($this->sp->matrix2numpy($m->inv(), dtype: 'float')->tolist())->toBe([[-2.0, 1.0], [1.5, -0.5]]);
 })->skip(fn () => ! pythonHasModule('sympy') || ! pythonHasModule('numpy'), 'SymPy or numpy is not installed');

@@ -17,7 +17,7 @@ $f = $sp->lambdify($x, $sp->sympify('x**2 + 1'));
 $f(3);                                                   // 10
 ```
 
-* **SymPy numbers are proxies**, not PHP numbers: `Integer`, `Rational` and `Float` are SymPy classes, not Python `int`/`float`. Convert with `$py->functions->int($n)`, `$py->functions->float($n)` or `(string) $n` (exact: `'5/4'`).
+* **SymPy's whole numbers arrive as PHP ints** (`sympy.Integer` is exact, so `solve()` gives `[2, 3]`). Fractions (`Rational`) and high-precision floats (`Float`) stay proxies, because a PHP float would lose precision: print them (`(string) $n` gives `'5/4'`) or convert with `$py->functions->float($n)`.
 * Build expressions from strings with `sympify()`, or use method forms: there are no operators on proxies, so `x**2` is `$x->__pow__(2)`.
 * `solve()` for a system returns a dict keyed by `Symbol`s. Those can't be PHP array keys, so the dict stays a proxy; convert in Python: `$py->eval("{str(k): v for k, v in ...}")`.
 * `lambdify()` returns a plain Python function: call it from PHP like a closure.

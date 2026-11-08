@@ -37,6 +37,8 @@ vendor/bin/pyhp setup
 vendor/bin/pyhp info      # check that everything is in place
 ```
 
+Starting a new project? `composer create-project pyhp/starter my-app` gives you a working app with pandas, matplotlib, a web page, tests and a lock file ([pyhp-php/starter](https://github.com/pyhp-php/starter)).
+
 PyHP finds that environment by itself. Requirements: PHP 8.2+ (64-bit) and Python 3.10+. See [Installation](docs/02-installation.md) for every option.
 
 ## A few examples
@@ -131,6 +133,8 @@ Contributions are welcome: bug reports, examples for more libraries, fixes and f
 PHP powers a huge part of the web, but the best tools for data analysis, scientific computing, natural language processing and machine learning live in Python. PyHP's goal is to make those tools usable from PHP today, by PHP developers who may not know Python well, until someone builds native PHP versions of NumPy and pandas.
 
 The design choices follow from that goal: no compiled extension to install, the same code on Linux, Windows and macOS, a context shared between PHP and Python instead of one-off calls, and documentation that is honest about every limitation. It's also meant to be a tool that's enjoyable to build and to use.
+
+The plan for the next versions is in [`ROADMAP.md`](ROADMAP.md).
 
 ## About the author
 

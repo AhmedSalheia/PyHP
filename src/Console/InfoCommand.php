@@ -13,8 +13,11 @@ use PyHP\OutputMode;
 use PyHP\Session;
 use PyHP\Setup\CommandRunner;
 use PyHP\Setup\Installer;
+use PyHP\Setup\LockFile;
+use PyHP\Setup\ProjectRequirements;
 use PyHP\Setup\PythonLocation;
 use PyHP\Setup\PythonSource;
+use PyHP\Setup\Requirement;
 use PyHP\Setup\SetupConfig;
 
 /**
@@ -67,9 +70,11 @@ final class InfoCommand
         $setup = SetupConfig::fromProject($root);
         $location = Config::locatePython($root);
 
+        $requirements = ProjectRequirements::collect($root, $setup);
+
         $this->php();
-        $requirements = $this->project($root, $setup);
-        $this->python($root, $location, $requirements);
+        $names = $this->project($root, $setup, $requirements);
+        $this->python($root, $location, $names, $requirements->overrides() !== []);
         $this->problemsReport();
 
         return $this->problems === [] ? 0 : 1;
@@ -111,42 +116,60 @@ final class InfoCommand
         }
     }
 
-    /** @return list<string> the package names the project asks for */
-    private function project(string $root, SetupConfig $setup): array
+    /** @return list<string> the package names to look up in the interpreter */
+    private function project(string $root, SetupConfig $setup, ProjectRequirements $requirements): array
     {
         $this->heading('Project');
         $this->row('Root', $root);
         $this->row('Python wanted', $setup->python ?? 'any (extra.pyhp.python not set)');
 
-        if ($setup->requirementsFile !== null) {
-            $file = $root.DIRECTORY_SEPARATOR.$setup->requirementsFile;
-            if (! is_file($file)) {
-                $this->row('Requirements', "{$setup->requirementsFile} (not found)");
-                $this->problems[] = "The requirements file {$setup->requirementsFile} doesn't exist.";
-
-                return [];
-            }
-            $names = self::namesFromFile((string) file_get_contents($file));
-            $this->row('Requirements', $setup->requirementsFile.' ('.count($names).' packages)');
-
-            return $names;
+        if ($setup->requirementsFile !== null && ! is_file($root.DIRECTORY_SEPARATOR.$setup->requirementsFile)) {
+            $this->row('Requirements', "{$setup->requirementsFile} (not found)");
+            $this->problems[] = "The requirements file {$setup->requirementsFile} doesn't exist.";
+        } elseif ($setup->requirementsFile !== null) {
+            $own = array_filter($requirements->all(), static fn (Requirement $r): bool => $r->origin === ProjectRequirements::ROOT);
+            $this->row('Requirements', $setup->requirementsFile.' ('.count($own).' packages)');
+        } else {
+            $this->row('Requirements', $setup->requirements === [] ? 'none' : implode(', ', $setup->requirements));
         }
 
-        $this->row('Requirements', $setup->requirements === [] ? 'none' : implode(', ', $setup->requirements));
-
-        $names = [];
-        foreach ($setup->requirements as $requirement) {
-            $name = self::packageName($requirement);
-            if ($name !== null) {
-                $names[] = $name;
-            }
+        $fromPackages = array_map(
+            static fn (Requirement $r): string => "{$r->origin}: {$r->spec}",
+            $requirements->fromPackages(),
+        );
+        $this->row('From packages', $fromPackages === [] ? 'none' : implode(', ', $fromPackages));
+        if ($requirements->ignored() !== []) {
+            $this->row('Ignored', implode(', ', $requirements->ignored()).' (extra.pyhp.ignore-packages)');
         }
+        if ($requirements->overrides() !== []) {
+            $this->row('Overrides', implode(', ', $requirements->overrides()));
+        }
+        $this->lockRow($root, $setup, $requirements);
 
-        return $names;
+        return $requirements->names();
+    }
+
+    private function lockRow(string $root, SetupConfig $setup, ProjectRequirements $requirements): void
+    {
+        $file = $root.DIRECTORY_SEPARATOR.LockFile::NAME;
+        if (! is_file($file)) {
+            $this->row('Lock file', 'none (optional; vendor/bin/pyhp lock writes one with exact versions)');
+
+            return;
+        }
+        $contents = (string) file_get_contents($file);
+        $count = count(LockFile::packageNames($contents));
+        if (LockFile::fingerprintIn($contents) === LockFile::fingerprint($root, $setup, $requirements)) {
+            $this->row('Lock file', LockFile::NAME." (up to date, {$count} packages)");
+
+            return;
+        }
+        $this->row('Lock file', LockFile::NAME.' (out of date)');
+        $this->problems[] = LockFile::NAME.' is out of date: the Python requirements changed since it was written. Run: vendor/bin/pyhp lock';
     }
 
     /** @param list<string> $requirements */
-    private function python(string $root, PythonLocation $location, array $requirements): void
+    private function python(string $root, PythonLocation $location, array $requirements, bool $hasOverrides): void
     {
         $this->heading('Python');
         $this->row('Interpreter', $location->python);
@@ -160,6 +183,9 @@ final class InfoCommand
 
         $uv = $this->runner->find('uv');
         $uvVersion = $uv === null ? null : $this->runner->capture([$uv, '--version'], $root);
+        if ($uv === null && $hasOverrides) {
+            $this->problems[] = 'extra.pyhp.overrides needs uv, which is not installed: '.Installer::UV_INSTALL_URL;
+        }
         $this->row('uv', $uv === null ? 'not installed (optional; makes pyhp setup faster and can download Python)' : ($uvVersion ?? 'found')." at {$uv}");
 
         $probe = $this->runner->capture(
@@ -250,27 +276,6 @@ final class InfoCommand
             'executable' => $data['executable'],
             'packages' => $packages,
         ];
-    }
-
-    /** @return list<string> package names from a requirements file, ignoring comments and pip options */
-    private static function namesFromFile(string $contents): array
-    {
-        $names = [];
-        foreach (preg_split('/\R/', $contents) ?: [] as $line) {
-            $line = trim((string) preg_replace('/(^|\s)#.*$/', '', $line));
-            $name = $line === '' || str_starts_with($line, '-') ? null : self::packageName($line);
-            if ($name !== null) {
-                $names[] = $name;
-            }
-        }
-
-        return $names;
-    }
-
-    /** The distribution name at the start of a pip requirement ("pandas>=2", "spacy[ja]", "x @ https://..."). */
-    private static function packageName(string $requirement): ?string
-    {
-        return preg_match('/^\s*([A-Za-z0-9][A-Za-z0-9._-]*)/', $requirement, $match) === 1 ? $match[1] : null;
     }
 
     private static function pyhpVersion(): string

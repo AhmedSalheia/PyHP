@@ -237,3 +237,70 @@ test('a Python that cannot report its version is skipped', function (): void {
 
     expect($runner->commandLines()[0])->toBe("/usr/bin/python -m venv {$this->venv}");
 });
+
+test('requirements of installed Composer packages are listed and installed', function (): void {
+    installPackages($this->root, [
+        'acme/nlp' => ['extra' => ['pyhp' => ['requirements' => ['spacy>=3.8']]]],
+        'acme/legacy' => ['extra' => ['pyhp' => ['requirements' => ['tensorflow']]]],
+    ]);
+    $runner = new FakeCommandRunner(programs: ['uv' => '/bin/uv'], onRun: $this->createsVenv);
+    $config = new SetupConfig(requirements: ['pandas'], ignorePackages: ['acme/legacy']);
+
+    $code = (new Installer($runner, $this->write, 'Linux'))->install($config, $this->root);
+
+    $python = VirtualEnv::python($this->venv, 'Linux');
+    $text = implode("\n", $this->lines->getArrayCopy());
+    expect($code)->toBe(0)
+        ->and($runner->commandLines()[1])->toBe("/bin/uv pip install --python {$python} pandas spacy>=3.8")
+        ->and($text)->toContain('acme/nlp: spacy>=3.8')
+        ->and($text)->toContain('Skipping the Python requirements of acme/legacy');
+});
+
+test('overrides are passed to uv in a file', function (): void {
+    ($this->createsVenv)(['venv']);
+    $seen = new ArrayObject;
+    $runner = new FakeCommandRunner(programs: ['uv' => '/bin/uv'], onRun: function (array $command) use ($seen): void {
+        $at = array_search('--override', $command, true);
+        if ($at !== false) {
+            $seen->append((string) file_get_contents($command[$at + 1]));
+        }
+    });
+    $config = new SetupConfig(requirements: ['pandas'], overrides: ['numpy<2', 'pillow==10.4.0']);
+
+    $code = (new Installer($runner, $this->write, 'Linux'))->install($config, $this->root);
+
+    expect($code)->toBe(0)
+        ->and($runner->commandLines()[0])->toContain('--override')
+        ->and($seen->getArrayCopy())->toBe(["numpy<2\npillow==10.4.0\n"])
+        ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('numpy<2');
+});
+
+test('overrides without uv stop the setup before anything runs', function (): void {
+    $runner = new FakeCommandRunner(
+        programs: ['python3' => '/usr/bin/python3'],
+        captures: [probe('/usr/bin/python3') => '3.12'],
+    );
+
+    $code = (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig(overrides: ['numpy<2']), $this->root);
+
+    expect($code)->toBe(1)
+        ->and($runner->ran)->toBe([])
+        ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('extra.pyhp.overrides needs uv');
+});
+
+test('a failed install explains which packages asked for the same Python package', function (): void {
+    ($this->createsVenv)(['venv']);
+    installPackages($this->root, ['acme/old-report' => ['extra' => ['pyhp' => ['requirements' => ['pandas<2']]]]]);
+    $python = VirtualEnv::python($this->venv, 'Linux');
+    $runner = new FakeCommandRunner(
+        programs: ['uv' => '/bin/uv'],
+        exitCodes: ["/bin/uv pip install --python {$python} pandas>=2 pandas<2" => 1],
+    );
+
+    $code = (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig(requirements: ['pandas>=2']), $this->root);
+
+    $text = implode("\n", $this->lines->getArrayCopy());
+    expect($code)->toBe(1)
+        ->and($text)->toContain('pandas: pandas>=2 (your project), pandas<2 (acme/old-report)')
+        ->and($text)->toContain('ignore-packages');
+});

@@ -105,3 +105,38 @@ test('info reports a broken composer.json on stderr', function (): void {
     expect($code)->toBe(1)
         ->and(implode('', $this->errors->getArrayCopy()))->toContain('composer.json');
 });
+
+test('pyhp lock runs the resolver with the command line options', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['six']]]]));
+    $runner = new FakeCommandRunner(programs: ['uv' => '/bin/uv']);
+
+    $code = ($this->app)($runner)->run(['lock', '--python=3.13', '--dry-run'], $this->root);
+
+    expect($code)->toBe(0)
+        ->and(implode('', $this->output->getArrayCopy()))->toContain('> /bin/uv pip compile .pyhp-requirements.in --universal')
+        ->and(implode('', $this->output->getArrayCopy()))->toContain('--python-version 3.13');
+});
+
+test('pyhp lock rejects setup-only options', function (): void {
+    $code = ($this->app)(new FakeCommandRunner)->run(['lock', '--exact'], $this->root);
+
+    expect($code)->toBe(1)
+        ->and(implode('', $this->errors->getArrayCopy()))->toContain('Unknown option "--exact" for lock');
+});
+
+test('setup --exact syncs instead of installing', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['six']]]]));
+    file_put_contents($this->root.'/pyhp.lock', "six==1.17.0\n");
+    $runner = new FakeCommandRunner(programs: ['uv' => '/bin/uv']);
+
+    ($this->app)($runner)->run(['setup', '--exact', '--dry-run'], $this->root);
+
+    expect(implode('', $this->output->getArrayCopy()))->toContain('pip sync --python');
+});
+
+test('the help mentions lock and --exact', function (): void {
+    ($this->app)(new FakeCommandRunner)->run(['help'], $this->root);
+
+    expect(implode('', $this->output->getArrayCopy()))->toContain('pyhp lock')
+        ->and(implode('', $this->output->getArrayCopy()))->toContain('--exact');
+});

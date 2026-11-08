@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use PyHP\Console\InfoCommand;
+use PyHP\Setup\LockFile;
+use PyHP\Setup\ProjectRequirements;
+use PyHP\Setup\SetupConfig;
 use PyHP\Setup\VirtualEnv;
 
 beforeEach(function (): void {
@@ -189,3 +192,70 @@ test('output from the interpreter that is not the expected JSON counts as not st
     'not JSON' => ['Python 2.7.18'],
     'wrong shape' => ['{"version": 3}'],
 ]);
+
+test('requirements from Composer packages, ignored packages and overrides are shown', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => [
+        'requirements' => ['pandas'],
+        'ignore-packages' => ['acme/legacy'],
+        'overrides' => ['numpy<2'],
+    ]]]));
+    installPackages($this->root, [
+        'acme/nlp' => ['extra' => ['pyhp' => ['requirements' => ['spacy>=3.8']]]],
+        'acme/legacy' => ['extra' => ['pyhp' => ['requirements' => ['tensorflow']]]],
+    ]);
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(
+        programs: ['uv' => '/bin/uv'],
+        captures: [
+            infoProbe($python, ['pandas', 'spacy']) => probeAnswer(packages: ['pandas' => '3.1.1', 'spacy' => '3.8.18']),
+            '/bin/uv --version' => 'uv 0.13.7',
+        ],
+    );
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    $text = ($this->text)();
+    expect($code)->toBe(0)
+        ->and($text)->toContain('acme/nlp: spacy>=3.8')
+        ->and($text)->toContain('acme/legacy')
+        ->and($text)->toContain('numpy<2')
+        ->and($text)->toContain('spacy 3.8.18');
+});
+
+test('overrides without uv are a problem', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['overrides' => ['numpy<2']]]]));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => probeAnswer()]);
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect($code)->toBe(1)
+        ->and(($this->text)())->toContain('extra.pyhp.overrides needs uv');
+});
+
+test('the lock file is reported as missing, up to date or out of date', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['six']]]]));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, ['six']) => probeAnswer(packages: ['six' => '1.17.0'])]);
+    $config = SetupConfig::fromProject($this->root);
+    $fresh = LockFile::fingerprint($this->root, $config, ProjectRequirements::collect($this->root, $config));
+
+    $none = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+    $noneText = ($this->text)();
+    $this->lines->exchangeArray([]);
+
+    file_put_contents($this->root.'/pyhp.lock', LockFile::withHeader("six==1.17.0\n", $fresh, 'uv'));
+    $upToDate = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+    $upToDateText = ($this->text)();
+    $this->lines->exchangeArray([]);
+
+    file_put_contents($this->root.'/pyhp.lock', LockFile::withHeader("six==1.17.0\n", 'stale', 'uv'));
+    $stale = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect($none)->toBe(0)
+        ->and($noneText)->toContain('none (optional')
+        ->and($upToDate)->toBe(0)
+        ->and($upToDateText)->toContain('pyhp.lock (up to date')
+        ->and($stale)->toBe(1)
+        ->and(($this->text)())->toContain('out of date');
+});

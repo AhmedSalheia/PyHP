@@ -92,6 +92,10 @@ test('invalid settings are rejected with a clear message', function (array $pyhp
     'requirements of the wrong type' => [['requirements' => 5], 'extra.pyhp.requirements'],
     'non-string requirement' => [['requirements' => ['pandas', 2]], 'extra.pyhp.requirements'],
     'unknown key' => [['packages' => ['pandas']], 'packages'],
+    'ignore-packages not a list' => [['ignore-packages' => 'acme/x'], 'extra.pyhp.ignore-packages'],
+    'ignore-packages with a bad name' => [['ignore-packages' => ['not a package']], 'extra.pyhp.ignore-packages'],
+    'overrides not a list' => [['overrides' => 'numpy<2'], 'extra.pyhp.overrides'],
+    'empty override' => [['overrides' => ['']], 'extra.pyhp.overrides'],
 ]);
 
 test('extra.pyhp must be an object', function (): void {
@@ -117,4 +121,25 @@ test('the venv folder resolves against the project root unless it is absolute', 
 test('the constructor validates the version and the venv folder', function (): void {
     expect(fn () => new SetupConfig(python: '3'))->toThrow(ConfigException::class, 'must look like 3.12')
         ->and(fn () => new SetupConfig(venv: ''))->toThrow(ConfigException::class, 'must not be empty');
+});
+
+test('ignore-packages and overrides are read from extra.pyhp', function (): void {
+    writeComposerJson($this->root, ['extra' => ['pyhp' => [
+        'ignore-packages' => ['acme/heavy-nlp'],
+        'overrides' => ['numpy<2'],
+    ]]]);
+
+    $config = SetupConfig::fromProject($this->root);
+
+    expect($config->ignorePackages)->toBe(['acme/heavy-nlp'])
+        ->and($config->overrides)->toBe(['numpy<2'])
+        ->and($config->with(python: '3.12')->overrides)->toBe(['numpy<2'])
+        ->and($config->with(python: '3.12')->ignorePackages)->toBe(['acme/heavy-nlp']);
+});
+
+test('the vendor folder follows config.vendor-dir', function (): void {
+    writeComposerJson($this->root, ['config' => ['vendor-dir' => 'lib/vendor']]);
+
+    expect(SetupConfig::fromProject($this->root)->vendorDir)->toBe('lib/vendor')
+        ->and((new SetupConfig)->vendorDir)->toBe('vendor');
 });

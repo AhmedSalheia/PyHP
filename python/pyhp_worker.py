@@ -24,6 +24,8 @@ import io
 import json
 import linecache
 import math
+import numbers
+import operator
 import os
 import re
 import socket
@@ -324,6 +326,12 @@ def _encode_scalar(value: object, strict: bool) -> Json:  # one flat type switch
     numpy_value = _unwrap_numpy_scalar(value)
     if numpy_value is not value:
         return _encode_scalar(numpy_value, strict)
+    if isinstance(value, numbers.Integral) and not isinstance(value, int):
+        # Whole numbers that aren't Python ints (sympy.Integer, ...) are exact, so they
+        # can become PHP ints losslessly; int subclasses keep their proxy (see above).
+        whole = operator.index(value)
+        if INT64_MIN <= whole <= INT64_MAX:
+            return whole
     raise _UnconvertibleError
 
 

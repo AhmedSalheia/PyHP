@@ -8,6 +8,32 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+## [0.3.0] - 2026-11-08
+
+### Added
+- Real-world tests of `pyhp setup` in CI (`tests/smoke/setup-smoke.php`): on Linux, Windows and macOS, with uv (downloading Python) and with the system Python, a fresh Composer project installs PyHP, runs `pyhp setup` twice and `pyhp info`, and checks that a session runs in the new venv.
+- `TASKS.md`: the tasks of the current scope.
+- The README points to the new starter project, `composer create-project pyhp/starter my-app` ([pyhp-php/starter](https://github.com/pyhp-php/starter)).
+- Python requirements declared by installed Composer packages: any package can list them in its own `extra.pyhp.requirements` (a list or a requirements file), and `pyhp setup` collects them from `vendor/composer/installed.json` and installs them with the project's own. `setup` and `pyhp info` show which package asked for what.
+- `extra.pyhp.ignore-packages` skips a Composer package's Python requirements; `extra.pyhp.overrides` forces versions over everyone else's rules (uv only; with pip, `setup` stops with an explanation).
+- When the installer can't satisfy every rule, `pyhp setup` lists each Python package requested by more than one source and the Composer packages behind each rule.
+- `config.vendor-dir` in `composer.json` is respected when looking for installed packages.
+- `vendor/bin/pyhp lock`: resolves every Python requirement (the project's, Composer packages', overrides) and writes exact versions to `pyhp.lock`, for every operating system with uv (`uv pip compile --universal`) or for the current one with pip. `pyhp setup` installs exactly the locked versions and warns when the lock no longer matches the requirements; `pyhp info` reports whether it's up to date.
+- `pyhp setup --exact`: the venv ends up containing exactly what the lock (or the requirements) lists; other packages are removed (`uv pip sync`, or pip install plus uninstall).
+- The CI smoke test also covers a Composer package declaring its own Python requirement, `pyhp lock` and `pyhp setup --exact`, on all three systems.
+
+### Changed
+- Whole numbers that aren't Python `int` (`sympy.Integer`, anything registered as `numbers.Integral`) now arrive in PHP as `int` when they fit in 64 bits, instead of as proxies: `solve()` returns `[2, 3]` and `$py->functions->int()` isn't needed. Larger values, `int` subclasses (`IntEnum`), fractions and high-precision floats still stay proxies.
+
+### Added
+- `ROADMAP.md`: the plan for v0.3.0, v0.4.0 and the goals for v1.0.0.
+
+### Changed
+- Composer downloads of PyHP contain only what applications need (`src/`, `bin/`, `python/`, `composer.json`, README, CHANGELOG, LICENSE); tests, examples, docs, benchmarks and tool configs stay in the repository (`export-ignore` in `.gitattributes`).
+
+### Removed
+- `studies/` and `docs/PROJECT_CONTEXT.md`: design notes used while deciding features; the decisions are reflected in the docs, the CHANGELOG and `ROADMAP.md`.
+
 ## [0.2.0] - 2026-11-07
 
 ### Added
@@ -56,7 +82,8 @@ First public release.
 - CI on Linux, Windows and macOS with PHP 8.2 / 8.4 and Python 3.10 / 3.13: Pest (80% coverage gate), PHPStan max, Pint, pytest, mypy --strict, ruff.
 - SymPy and spaCy suites on Linux; pandas and NumPy on all three systems.
 
-[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.2.0...develop
+[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.3.0...develop
+[0.3.0]: https://github.com/pyhp-php/pyhp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/pyhp-php/pyhp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pyhp-php/pyhp/releases/tag/v0.1.0

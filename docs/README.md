@@ -19,4 +19,4 @@ Read the files in order; each one builds on the previous ones.
 15. [How PyHP works inside](15-internals.md)
 16. [Development](16-development.md)
 
-Also here: [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md), the design decisions and roadmap.
+The plan for the next versions is in [`ROADMAP.md`](../ROADMAP.md).

@@ -15,6 +15,8 @@ use PyHP\Exception\ConfigException;
  *
  * "requirements" is either a list of packages or the path of a requirements file.
  * Without it, a requirements.txt in the project root is used if there is one.
+ * Installed Composer packages can declare requirements the same way; the root
+ * project can skip theirs ("ignore-packages") or force versions ("overrides", uv only).
  */
 final readonly class SetupConfig
 {
@@ -22,7 +24,11 @@ final readonly class SetupConfig
 
     public const DEFAULT_REQUIREMENTS_FILE = 'requirements.txt';
 
-    private const KEYS = ['python', 'venv', 'requirements'];
+    private const KEYS = ['python', 'venv', 'requirements', 'ignore-packages', 'overrides'];
+
+    public const DEFAULT_VENDOR_DIR = 'vendor';
+
+    private const PACKAGE_NAME_PATTERN = '#^[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]*$#';
 
     private const VERSION_PATTERN = '/^3\.\d{1,2}(\.\d{1,2})?$/';
 
@@ -31,12 +37,18 @@ final readonly class SetupConfig
      * @param  string  $venv  Folder of the virtual environment, relative to the project root or absolute.
      * @param  list<string>  $requirements  Packages to install, in pip syntax ("pandas>=2").
      * @param  string|null  $requirementsFile  A requirements file to install from, relative to the project root.
+     * @param  list<string>  $ignorePackages  Composer packages whose Python requirements are skipped.
+     * @param  list<string>  $overrides  Version rules that replace everyone else's ("numpy<2"); uv only.
+     * @param  string  $vendorDir  Composer's vendor folder, relative to the project root.
      */
     public function __construct(
         public ?string $python = null,
         public string $venv = self::DEFAULT_VENV,
         public array $requirements = [],
         public ?string $requirementsFile = null,
+        public array $ignorePackages = [],
+        public array $overrides = [],
+        public string $vendorDir = self::DEFAULT_VENDOR_DIR,
     ) {
         if ($python !== null && ! self::isVersion($python)) {
             throw new ConfigException(sprintf('The Python version must look like 3.12, got "%s".', $python));
@@ -49,7 +61,8 @@ final readonly class SetupConfig
     /** Reads the settings of the project in $root (its composer.json and requirements.txt). */
     public static function fromProject(string $root): self
     {
-        $settings = self::composerSettings($root);
+        $composer = self::composerJson($root);
+        $settings = self::pyhpSettings($composer);
         foreach (array_keys($settings) as $key) {
             if (! in_array($key, self::KEYS, true)) {
                 throw new ConfigException(sprintf(
@@ -80,7 +93,15 @@ final readonly class SetupConfig
             throw new ConfigException('composer.json extra.pyhp.venv must not be empty.');
         }
 
-        return new self($python, $venv, $requirements, $requirementsFile);
+        return new self(
+            $python,
+            $venv,
+            $requirements,
+            $requirementsFile,
+            self::stringList($settings, 'ignore-packages', self::PACKAGE_NAME_PATTERN, 'Composer package names like "acme/nlp-tools"'),
+            self::stringList($settings, 'overrides', '/\S/', 'version rules like "numpy<2"'),
+            self::vendorDir($composer),
+        );
     }
 
     /** A copy with the command line's choices applied; null keeps the current value. */
@@ -90,7 +111,15 @@ final readonly class SetupConfig
             throw new ConfigException(sprintf('--python must be a version like 3.12, got "%s".', $python));
         }
 
-        return new self($python ?? $this->python, $venv ?? $this->venv, $this->requirements, $this->requirementsFile);
+        return new self(
+            $python ?? $this->python,
+            $venv ?? $this->venv,
+            $this->requirements,
+            $this->requirementsFile,
+            $this->ignorePackages,
+            $this->overrides,
+            $this->vendorDir,
+        );
     }
 
     /** The venv folder as an absolute path. */
@@ -99,8 +128,8 @@ final readonly class SetupConfig
         return self::isAbsolute($this->venv) ? $this->venv : rtrim($root, '/\\').DIRECTORY_SEPARATOR.$this->venv;
     }
 
-    /** @return array<array-key, mixed> */
-    private static function composerSettings(string $root): array
+    /** @return array<array-key, mixed> the decoded composer.json, or [] when there is none */
+    private static function composerJson(string $root): array
     {
         $file = $root.DIRECTORY_SEPARATOR.'composer.json';
         if (! is_file($file)) {
@@ -114,12 +143,50 @@ final readonly class SetupConfig
             throw new ConfigException(sprintf('Could not read %s: %s.', $file, $e->getMessage()), 0, $e);
         }
 
-        $settings = is_array($composer) && is_array($composer['extra'] ?? null) ? ($composer['extra']['pyhp'] ?? []) : [];
+        return is_array($composer) ? $composer : [];
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $composer
+     * @return array<array-key, mixed>
+     */
+    private static function pyhpSettings(array $composer): array
+    {
+        $settings = is_array($composer['extra'] ?? null) ? ($composer['extra']['pyhp'] ?? []) : [];
         if (! is_array($settings) || ($settings !== [] && array_is_list($settings))) {
             throw new ConfigException('composer.json extra.pyhp must be an object, like {"requirements": ["pandas"]}.');
         }
 
         return $settings;
+    }
+
+    /** @param array<array-key, mixed> $composer */
+    private static function vendorDir(array $composer): string
+    {
+        $dir = is_array($composer['config'] ?? null) ? ($composer['config']['vendor-dir'] ?? null) : null;
+
+        return is_string($dir) && $dir !== '' ? $dir : self::DEFAULT_VENDOR_DIR;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $settings
+     * @return list<string>
+     */
+    private static function stringList(array $settings, string $key, string $pattern, string $expected): array
+    {
+        $value = $settings[$key] ?? [];
+        if (! is_array($value) || ! array_is_list($value)) {
+            throw new ConfigException("composer.json extra.pyhp.{$key} must be a list of {$expected}.");
+        }
+        $items = [];
+        foreach ($value as $item) {
+            if (! is_string($item) || preg_match($pattern, $item) !== 1) {
+                throw new ConfigException("composer.json extra.pyhp.{$key} must be a list of {$expected}.");
+            }
+            $items[] = $item;
+        }
+
+        return $items;
     }
 
     /** @return list<string> */

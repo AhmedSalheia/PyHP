@@ -81,12 +81,14 @@ final class FakeCommandRunner implements CommandRunner
      * @param  array<string, string>  $captures  command line (joined with spaces) => its output
      * @param  array<string, int>  $exitCodes  command line => exit code (default 0)
      * @param  (Closure(list<string>): void)|null  $onRun  side effect of running a command, e.g. creating the venv
+     * @param  (Closure(list<string>): ?int)|null  $exitCodeFor  exit code for commands not in $exitCodes (null: 0)
      */
     public function __construct(
         private readonly array $programs = [],
         private readonly array $captures = [],
         private readonly array $exitCodes = [],
         private readonly ?Closure $onRun = null,
+        private readonly ?Closure $exitCodeFor = null,
     ) {}
 
     public function find(string $program): ?string
@@ -97,7 +99,9 @@ final class FakeCommandRunner implements CommandRunner
     public function run(array $command, string $cwd): int
     {
         $this->ran[] = ['command' => $command, 'cwd' => $cwd];
-        $code = $this->exitCodes[implode(' ', $command)] ?? 0;
+        $code = $this->exitCodes[implode(' ', $command)]
+            ?? ($this->exitCodeFor !== null ? ($this->exitCodeFor)($command) : null)
+            ?? 0;
         if ($code === 0 && $this->onRun !== null) {
             ($this->onRun)($command);
         }
@@ -115,4 +119,28 @@ final class FakeCommandRunner implements CommandRunner
     {
         return array_map(fn (array $run): string => implode(' ', $run['command']), $this->ran);
     }
+}
+
+/**
+ * Installs fake Composer packages: writes vendor/composer/installed.json the way
+ * Composer 2 does, plus each package's folder and extra files.
+ *
+ * @param  array<string, array{extra?: array<string, mixed>, files?: array<string, string>}>  $packages
+ */
+function installPackages(string $root, array $packages, string $vendor = 'vendor'): void
+{
+    $entries = [];
+    foreach ($packages as $name => $package) {
+        $dir = $root.DIRECTORY_SEPARATOR.$vendor.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $name);
+        mkdir($dir, 0777, true);
+        foreach ($package['files'] ?? [] as $file => $contents) {
+            file_put_contents($dir.DIRECTORY_SEPARATOR.$file, $contents);
+        }
+        $entries[] = ['name' => $name, 'extra' => $package['extra'] ?? [], 'install-path' => '../'.$name];
+    }
+    @mkdir($root.DIRECTORY_SEPARATOR.$vendor.DIRECTORY_SEPARATOR.'composer', 0777, true);
+    file_put_contents(
+        $root.DIRECTORY_SEPARATOR.$vendor.DIRECTORY_SEPARATOR.'composer'.DIRECTORY_SEPARATOR.'installed.json',
+        json_encode(['packages' => $entries, 'dev' => true, 'dev-package-names' => []], JSON_THROW_ON_ERROR),
+    );
 }

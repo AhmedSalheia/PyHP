@@ -18,6 +18,7 @@ final class Application
 
         Usage:
           pyhp setup [options]   Create the project's Python environment and install its packages
+          pyhp lock [options]    Resolve every Python requirement and write exact versions to pyhp.lock
           pyhp info              Show PHP, Python, venv and package details for debugging
           pyhp help              Show this help
 
@@ -27,7 +28,12 @@ final class Application
           --python=VERSION   Python version for the environment, e.g. 3.12 (default: extra.pyhp.python)
           --venv=DIR         Folder of the virtual environment (default: extra.pyhp.venv, or .venv)
           --no-uv            Don't use uv even if it's installed; use the system Python with venv and pip
+          --exact            Make the venv match pyhp.lock (or the requirements) exactly, removing other packages
           --dry-run          Only print the commands that would run
+
+        Options for lock: --python, --no-uv and --dry-run, as for setup. With uv the lock
+        covers every operating system; without it, only the current one.
+        When pyhp.lock exists, setup installs exactly the versions it lists.
 
         Packages come from composer.json:
           "extra": {"pyhp": {"python": "3.12", "requirements": ["pandas>=2"]}}
@@ -70,24 +76,25 @@ final class Application
                 return $this->fail($e->getMessage());
             }
         }
-        if ($command !== 'setup') {
+        if ($command !== 'setup' && $command !== 'lock') {
             return $this->fail(sprintf('Unknown command "%s". Run "pyhp help" to see the commands.', $command));
         }
 
         try {
-            return $this->setup(array_slice($args, 1), $cwd);
+            return $this->setupOrLock($command, array_slice($args, 1), $cwd);
         } catch (ConfigException $e) {
             return $this->fail($e->getMessage());
         }
     }
 
     /** @param list<string> $args */
-    private function setup(array $args, string $cwd): int
+    private function setupOrLock(string $command, array $args, string $cwd): int
     {
         $python = null;
         $venv = null;
         $useUv = true;
         $dryRun = false;
+        $exact = false;
 
         for ($i = 0; $i < count($args); $i++) {
             $arg = $args[$i];
@@ -106,6 +113,12 @@ final class Application
                 case '--dry-run':
                     $dryRun = true;
                     break;
+                case '--exact':
+                    if ($command === 'lock') {
+                        return $this->fail('Unknown option "--exact" for lock. Run "pyhp help" to see the options.');
+                    }
+                    $exact = true;
+                    break;
                 case '--python':
                 case '--venv':
                     if ($value === null) {
@@ -122,7 +135,7 @@ final class Application
                     }
                     break;
                 default:
-                    return $this->fail(sprintf('Unknown option "%s" for setup. Run "pyhp help" to see the options.', $name));
+                    return $this->fail(sprintf('Unknown option "%s" for %s. Run "pyhp help" to see the options.', $name, $command));
             }
         }
 
@@ -132,7 +145,9 @@ final class Application
             $out($line.PHP_EOL);
         }, $this->osFamily);
 
-        return $installer->install($config, $cwd, $useUv, $dryRun);
+        return $command === 'lock'
+            ? $installer->lock($config, $cwd, $useUv, $dryRun)
+            : $installer->install($config, $cwd, $useUv, $dryRun, $exact);
     }
 
     private function fail(string $message): int
