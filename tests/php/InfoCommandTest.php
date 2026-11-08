@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use PyHP\Console\InfoCommand;
+use PyHP\Setup\LockFile;
+use PyHP\Setup\ProjectRequirements;
+use PyHP\Setup\SetupConfig;
 use PyHP\Setup\VirtualEnv;
 
 beforeEach(function (): void {
@@ -228,4 +231,31 @@ test('overrides without uv are a problem', function (): void {
 
     expect($code)->toBe(1)
         ->and(($this->text)())->toContain('extra.pyhp.overrides needs uv');
+});
+
+test('the lock file is reported as missing, up to date or out of date', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['six']]]]));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, ['six']) => probeAnswer(packages: ['six' => '1.17.0'])]);
+    $config = SetupConfig::fromProject($this->root);
+    $fresh = LockFile::fingerprint($this->root, $config, ProjectRequirements::collect($this->root, $config));
+
+    $none = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+    $noneText = ($this->text)();
+    $this->lines->exchangeArray([]);
+
+    file_put_contents($this->root.'/pyhp.lock', LockFile::withHeader("six==1.17.0\n", $fresh, 'uv'));
+    $upToDate = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+    $upToDateText = ($this->text)();
+    $this->lines->exchangeArray([]);
+
+    file_put_contents($this->root.'/pyhp.lock', LockFile::withHeader("six==1.17.0\n", 'stale', 'uv'));
+    $stale = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect($none)->toBe(0)
+        ->and($noneText)->toContain('none (optional')
+        ->and($upToDate)->toBe(0)
+        ->and($upToDateText)->toContain('pyhp.lock (up to date')
+        ->and($stale)->toBe(1)
+        ->and(($this->text)())->toContain('out of date');
 });

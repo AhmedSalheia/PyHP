@@ -81,12 +81,14 @@ final class FakeCommandRunner implements CommandRunner
      * @param  array<string, string>  $captures  command line (joined with spaces) => its output
      * @param  array<string, int>  $exitCodes  command line => exit code (default 0)
      * @param  (Closure(list<string>): void)|null  $onRun  side effect of running a command, e.g. creating the venv
+     * @param  (Closure(list<string>): ?int)|null  $exitCodeFor  exit code for commands not in $exitCodes (null: 0)
      */
     public function __construct(
         private readonly array $programs = [],
         private readonly array $captures = [],
         private readonly array $exitCodes = [],
         private readonly ?Closure $onRun = null,
+        private readonly ?Closure $exitCodeFor = null,
     ) {}
 
     public function find(string $program): ?string
@@ -97,7 +99,9 @@ final class FakeCommandRunner implements CommandRunner
     public function run(array $command, string $cwd): int
     {
         $this->ran[] = ['command' => $command, 'cwd' => $cwd];
-        $code = $this->exitCodes[implode(' ', $command)] ?? 0;
+        $code = $this->exitCodes[implode(' ', $command)]
+            ?? ($this->exitCodeFor !== null ? ($this->exitCodeFor)($command) : null)
+            ?? 0;
         if ($code === 0 && $this->onRun !== null) {
             ($this->onRun)($command);
         }

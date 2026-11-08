@@ -13,6 +13,7 @@ use PyHP\OutputMode;
 use PyHP\Session;
 use PyHP\Setup\CommandRunner;
 use PyHP\Setup\Installer;
+use PyHP\Setup\LockFile;
 use PyHP\Setup\ProjectRequirements;
 use PyHP\Setup\PythonLocation;
 use PyHP\Setup\PythonSource;
@@ -143,8 +144,28 @@ final class InfoCommand
         if ($requirements->overrides() !== []) {
             $this->row('Overrides', implode(', ', $requirements->overrides()));
         }
+        $this->lockRow($root, $setup, $requirements);
 
         return $requirements->names();
+    }
+
+    private function lockRow(string $root, SetupConfig $setup, ProjectRequirements $requirements): void
+    {
+        $file = $root.DIRECTORY_SEPARATOR.LockFile::NAME;
+        if (! is_file($file)) {
+            $this->row('Lock file', 'none (optional; vendor/bin/pyhp lock writes one with exact versions)');
+
+            return;
+        }
+        $contents = (string) file_get_contents($file);
+        $count = count(LockFile::packageNames($contents));
+        if (LockFile::fingerprintIn($contents) === LockFile::fingerprint($root, $setup, $requirements)) {
+            $this->row('Lock file', LockFile::NAME." (up to date, {$count} packages)");
+
+            return;
+        }
+        $this->row('Lock file', LockFile::NAME.' (out of date)');
+        $this->problems[] = LockFile::NAME.' is out of date: the Python requirements changed since it was written. Run: vendor/bin/pyhp lock';
     }
 
     /** @param list<string> $requirements */

@@ -5,6 +5,7 @@ PyHP installs a small command line tool as `vendor/bin/pyhp` (`vendor\bin\pyhp` 
 | Command | What it does |
 |---|---|
 | `pyhp setup` | Creates the project's Python virtual environment and installs its packages. |
+| `pyhp lock` | Resolves every Python requirement and writes the exact versions to `pyhp.lock`. |
 | `pyhp info` | Shows PHP, Python, venv, package and worker details, and what to fix. |
 | `pyhp help` | Lists the commands and options. |
 
@@ -38,11 +39,35 @@ Options:
 | `--python=3.13` | Overrides `extra.pyhp.python`. |
 | `--venv=DIR` | Overrides `extra.pyhp.venv`. |
 | `--no-uv` | Don't use uv even if it's installed. |
+| `--exact` | Make the venv match `pyhp.lock` (or the requirements) exactly, removing every other package. See [Exact environments](#exact-environments-pyhp-lock-and---exact). |
 | `--dry-run` | Only print the commands it would run. |
 
 On Windows, Composer also creates `vendor\bin\pyhp.bat`, so `vendor\bin\pyhp setup` works in Command Prompt and PowerShell.
 
 Setup installs packages; it doesn't remove ones you take out of the list. To start clean, delete the `.venv` folder and run setup again.
+
+## Exact environments: `pyhp lock` and `--exact`
+
+`pyhp setup` installs versions that satisfy your requirements, which can differ from machine to machine and from month to month. For the same versions everywhere, lock them, like `composer.lock` does for PHP packages:
+
+```bat
+vendor/bin/pyhp lock
+```
+
+This resolves every requirement (your project's, those of your Composer packages, and overrides) and writes **`pyhp.lock`** with the exact version of every Python package, including the packages they depend on. Commit it. From then on, `pyhp setup` installs exactly those versions, on your machine, your colleagues', in CI and in production.
+
+* **With uv**, the lock is resolved for every operating system at once (`uv pip compile --universal`), so a lock written on Windows also works on Linux servers.
+* **Without uv**, `pip install --dry-run --report` resolves it with the venv's Python (or a system Python). The lock is then valid only for that OS and Python version, and its header says so.
+* `lock` accepts `--python`, `--no-uv` and `--dry-run`, like `setup`.
+* The lock records a fingerprint of the requirements it came from. When you change them, `setup` warns that `pyhp.lock` is out of date (and still installs it), and `pyhp info` lists it as a problem. Run `pyhp lock` again.
+
+`pyhp setup --exact` goes one step further: the venv ends up containing **exactly** what the lock lists, and packages installed by hand or left over from old requirements are removed (uv uses `uv pip sync`; without uv, PyHP installs the lock with pip and uninstalls everything else except pip, setuptools and wheel). Without a `pyhp.lock`, `--exact` resolves the requirements into a temporary lock first.
+
+```bat
+vendor/bin/pyhp setup --exact     # in CI and deploy scripts
+```
+
+A venv created by uv contains no pip, so to switch an existing project from uv to `--no-uv`, delete `.venv` first.
 
 ## Python requirements from Composer packages
 
@@ -93,7 +118,7 @@ It checks everything between your PHP code and Python, in the order PyHP uses it
 |---|---|
 | **PyHP** | The installed PyHP version. |
 | **PHP** | Version, thread safety, 32/64-bit, the `php` binary, the OS, the loaded `php.ini`, and whether `proc_open()` is allowed (PyHP needs it to start Python). |
-| **Project** | The project root, the Python version and packages it asks for in `extra.pyhp` (or `requirements.txt`), the requirements each installed Composer package adds, ignored packages and overrides. |
+| **Project** | The project root, the Python version and packages it asks for in `extra.pyhp` (or `requirements.txt`), the requirements each installed Composer package adds, ignored packages, overrides, and whether `pyhp.lock` is up to date. |
 | **Python** | The interpreter PyHP will use and **why** (the `PYHP_PYTHON` variable, the project's venv, or the default command), the venv folder, uv's version if installed, Python's version and real executable, each required package with its installed version or `missing`, and a live test: it starts a PyHP worker and times its first answer. |
 | **Problems** | Everything that needs fixing, with the command that fixes it. |
 

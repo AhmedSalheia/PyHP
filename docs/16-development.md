@@ -65,7 +65,7 @@ Tests aren't run on commit (the PHP suite takes about 40 s); `composer check`, p
 
 `.github/workflows/ci.yml` runs every check on GitHub Actions for each push and pull request: the Python worker on Python 3.10 and 3.13, and the PHP suite on PHP 8.2 and 8.4 with pandas installed, on Linux, Windows and macOS. The Linux PHP jobs also install everything in `requirements-dev.txt`, so every optional library suite runs there; elsewhere those suites skip.
 
-The `setup-smoke` jobs test `pyhp setup` for real on all three systems, once with uv (forced to download Python) and once with the system Python: `tests/smoke/setup-smoke.php` creates a Composer project that installs PyHP from the checkout, runs `pyhp setup` twice and `pyhp info`, and checks that a session runs in the new venv. Run it locally with `php tests/smoke/setup-smoke.php` (or `--no-uv`).
+The `setup-smoke` jobs test `pyhp setup` for real on all three systems, once with uv (forced to download Python) and once with the system Python: `tests/smoke/setup-smoke.php` creates a Composer project that installs PyHP from the checkout plus a local package declaring its own Python requirement, runs `pyhp setup` twice and `pyhp info`, checks that a session runs in the new venv with both packages, writes `pyhp.lock`, and checks that `pyhp setup --exact` removes a stray package. Run it locally with `php tests/smoke/setup-smoke.php` (or `--no-uv`).
 
 macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page).
 
