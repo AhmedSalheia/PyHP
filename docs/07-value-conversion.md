@@ -31,8 +31,8 @@
 |---|---|---|
 | `None` | `null` | |
 | `bool`, `numpy.bool_` | `bool` | |
-| `int` within 64-bit range, NumPy integers | `int` | |
-| `int` outside 64-bit range | **proxy** | e.g. `2**70` — no silent precision loss. |
+| `int` within 64-bit range, NumPy integers, other whole-number types (`sympy.Integer`, anything registered as `numbers.Integral`) | `int` | Exact, so nothing is lost. |
+| whole numbers outside 64-bit range | **proxy** | e.g. `2**70` — no silent precision loss. |
 | `float`, NumPy floats | `float` | `nan`/`inf` become `NAN`/`INF`. |
 | `str` | `string` (UTF-8) | A `str` that can't be encoded as UTF-8 (lone surrogates) stays a proxy. |
 | `bytes` | `string` (binary) | Becomes a plain PHP string: **it returns to Python as `str` if it happens to be valid UTF-8.** |

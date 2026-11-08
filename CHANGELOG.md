@@ -12,6 +12,9 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - Real-world tests of `pyhp setup` in CI (`tests/smoke/setup-smoke.php`): on Linux, Windows and macOS, with uv (downloading Python) and with the system Python, a fresh Composer project installs PyHP, runs `pyhp setup` twice and `pyhp info`, and checks that a session runs in the new venv.
 - `TASKS.md`: the tasks of the current scope.
 
+### Changed
+- Whole numbers that aren't Python `int` (`sympy.Integer`, anything registered as `numbers.Integral`) now arrive in PHP as `int` when they fit in 64 bits, instead of as proxies: `solve()` returns `[2, 3]` and `$py->functions->int()` isn't needed. Larger values, `int` subclasses (`IntEnum`), fractions and high-precision floats still stay proxies.
+
 ### Added
 - `ROADMAP.md`: the plan for v0.3.0, v0.4.0 and the goals for v1.0.0.
 

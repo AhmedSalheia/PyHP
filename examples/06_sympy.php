@@ -9,17 +9,15 @@ declare(strict_types=1);
 require __DIR__.'/bootstrap.php';
 
 use PyHP\Py;
-use PyHP\PyObject;
 
 $py = Py::session();
 $sp = $py->import('sympy', as: 'sp');
-$int = fn (PyObject $n): int => $py->functions->int($n);
 
 // 1. Solve an equation written as a string.
 $x = $sp->symbols('x');
 $roots = $sp->solve($sp->sympify('x**2 - 5*x + 6'), $x);
-// SymPy numbers are not Python ints, so they arrive as proxies: convert them.
-echo 'Roots of x^2 - 5x + 6: '.implode(', ', array_map($int, $roots))."\n";
+// SymPy's whole numbers arrive as PHP ints; fractions and high-precision floats stay proxies.
+echo 'Roots of x^2 - 5x + 6: '.implode(', ', $roots)."\n";
 
 // 2. Calculus and simplification. Proxies print through (string).
 $expr = $sp->sympify('sin(x)**2 + cos(x)**2 + x**3');
@@ -50,7 +48,7 @@ echo implode('  ', $table)."\n";
 
 // 6. Matrices.
 $m = $sp->Matrix([[1, 2], [3, 4]]);
-echo 'det: '.$int($m->det()).', inverse: '.$m->inv()."\n";
+echo 'det: '.$m->det().', inverse: '.$m->inv()."\n";
 
 // 7. Solution sets are iterable.
 $values = [];
