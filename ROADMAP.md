@@ -7,8 +7,8 @@ Goal: make Python's libraries (data analysis, science, NLP, machine learning, an
 | 1 | Foundation | v0.1.0 | released 2026-11-07 | Worker, sessions, proxies, `vars`/`functions`/`classes`/`modules`, Python-style imports, PHP callbacks, fast table export, CI on three systems, MIT license. |
 | 2 | New home | v0.1.1 | released 2026-11-07 | Package renamed to `pyhp/pyhp`, repository moved to `pyhp-php/pyhp`. |
 | 3 | Tooling | v0.2.0 | released 2026-11-07 | `pyhp setup` (uv or venv/pip), `pyhp info`, automatic `.venv` detection, `Py::ref()`, examples 06–11, numbered docs. |
-| 4 | Ecosystem and data fidelity | v0.3.0 | in progress | Python requirements declared by any Composer package, exact environments, lossless numbers, real-world setup tests. |
-| 5 | Long-running PHP and frameworks | v0.4.0 | planned | Worker reuse and recovery for queue workers and app servers, live output, faster callbacks, a Laravel package. |
+| 4 | Ecosystem and data fidelity | v0.3.0 | released 2026-11-08 | Python requirements declared by any Composer package, exact environments, lossless numbers, real-world setup tests. |
+| 5 | Long-running PHP and frameworks | v0.4.0 | in progress | Worker reuse and recovery for queue workers and app servers, live output, faster callbacks, a Laravel package. |
 | 6 | Stable | v1.0.0 | goal | Frozen public API and protocol, documented guarantees, docs website, proven in production. |
 
 ## v0.3.0: Ecosystem and data fidelity

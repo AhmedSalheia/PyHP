@@ -8,9 +8,12 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+## [0.3.0] - 2026-11-08
+
 ### Added
 - Real-world tests of `pyhp setup` in CI (`tests/smoke/setup-smoke.php`): on Linux, Windows and macOS, with uv (downloading Python) and with the system Python, a fresh Composer project installs PyHP, runs `pyhp setup` twice and `pyhp info`, and checks that a session runs in the new venv.
 - `TASKS.md`: the tasks of the current scope.
+- The README points to the new starter project, `composer create-project pyhp/starter my-app` ([pyhp-php/starter](https://github.com/pyhp-php/starter)).
 - Python requirements declared by installed Composer packages: any package can list them in its own `extra.pyhp.requirements` (a list or a requirements file), and `pyhp setup` collects them from `vendor/composer/installed.json` and installs them with the project's own. `setup` and `pyhp info` show which package asked for what.
 - `extra.pyhp.ignore-packages` skips a Composer package's Python requirements; `extra.pyhp.overrides` forces versions over everyone else's rules (uv only; with pip, `setup` stops with an explanation).
 - When the installer can't satisfy every rule, `pyhp setup` lists each Python package requested by more than one source and the Composer packages behind each rule.
@@ -79,7 +82,8 @@ First public release.
 - CI on Linux, Windows and macOS with PHP 8.2 / 8.4 and Python 3.10 / 3.13: Pest (80% coverage gate), PHPStan max, Pint, pytest, mypy --strict, ruff.
 - SymPy and spaCy suites on Linux; pandas and NumPy on all three systems.
 
-[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.2.0...develop
+[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.3.0...develop
+[0.3.0]: https://github.com/pyhp-php/pyhp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/pyhp-php/pyhp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pyhp-php/pyhp/releases/tag/v0.1.0
