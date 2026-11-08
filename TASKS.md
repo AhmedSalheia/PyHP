@@ -1,20 +1,22 @@
 # Tasks
 
-## Scope 4: Ecosystem and data fidelity (v0.3.0)
+## Scope 5: Long-running PHP and frameworks (v0.4.0)
 
-Decisions (2026-11-08): Composer packages declare Python requirements in their own `extra.pyhp`; the root project can tighten versions, ignore a package's requirements (`extra.pyhp.ignore-packages`) and override versions (`extra.pyhp.overrides`, uv only); `pyhp lock` writes `pyhp.lock` (cross-platform with uv); the starter lives in its own repository, `pyhp-php/starter`.
+Goal: PyHP is comfortable in production setups where PHP processes live for a long time (queue workers, Laravel Octane, RoadRunner, FrankenPHP). See ROADMAP.md.
 
 ### Today: 2026-11-08
-- [r] `pyhp lock`, `pyhp.lock` and `pyhp setup --exact`, with the smoke test extended to cover them (branch: feature/lock-and-exact)
+- [ ] Agree on v0.4.0 design decisions (recovery hook API, session reuse rules, live output API, vectorize semantics, Laravel package scope)
 
 ### Backlog (this scope)
-- [ ] Starter project: new repository `pyhp-php/starter`, `composer create-project pyhp/starter`
-- [ ] Docs, CHANGELOG and release 0.3.0
+- [ ] Worker recovery: optional automatic restart after a crash or timeout, with a hook that rebuilds session state; `Session::isAlive()` and a cheap health check
+- [ ] Session reuse: a "one session per process" helper / small pool for queue workers and app servers, with clear rules for what is safe to share
+- [ ] Live output: stream what Python prints to a PHP callback while a call runs
+- [ ] `Py::vectorize()`: apply a PHP closure to a whole column or array in batches
+- [ ] `pyhp/laravel`: new repository; service provider, config, facade, `pyhp:setup` / `pyhp:info` artisan commands, request/worker-scoped sessions
+- [ ] Docs, CHANGELOG and release 0.4.0
 
 ### Done (this scope)
-- [x] Python requirements from installed Composer packages, root control and conflict reports (PR #29)
-- [x] Lossless numbers: integer-like Python numbers become PHP `int` when they fit in 64 bits (PR #28)
-- [x] Real-world `pyhp setup` tests in CI: Linux, Windows, macOS × uv / system Python (PR #27)
 
 ### Notes for next session
+- v0.3.0 tasks are archived in docs/tasks/v0.3.0.md.
 - ClickUp sync not set up for PyHP yet; TASKS.md is the source of truth.
