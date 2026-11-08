@@ -189,3 +189,43 @@ test('output from the interpreter that is not the expected JSON counts as not st
     'not JSON' => ['Python 2.7.18'],
     'wrong shape' => ['{"version": 3}'],
 ]);
+
+test('requirements from Composer packages, ignored packages and overrides are shown', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => [
+        'requirements' => ['pandas'],
+        'ignore-packages' => ['acme/legacy'],
+        'overrides' => ['numpy<2'],
+    ]]]));
+    installPackages($this->root, [
+        'acme/nlp' => ['extra' => ['pyhp' => ['requirements' => ['spacy>=3.8']]]],
+        'acme/legacy' => ['extra' => ['pyhp' => ['requirements' => ['tensorflow']]]],
+    ]);
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(
+        programs: ['uv' => '/bin/uv'],
+        captures: [
+            infoProbe($python, ['pandas', 'spacy']) => probeAnswer(packages: ['pandas' => '3.1.1', 'spacy' => '3.8.18']),
+            '/bin/uv --version' => 'uv 0.13.7',
+        ],
+    );
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    $text = ($this->text)();
+    expect($code)->toBe(0)
+        ->and($text)->toContain('acme/nlp: spacy>=3.8')
+        ->and($text)->toContain('acme/legacy')
+        ->and($text)->toContain('numpy<2')
+        ->and($text)->toContain('spacy 3.8.18');
+});
+
+test('overrides without uv are a problem', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['overrides' => ['numpy<2']]]]));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => probeAnswer()]);
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
+
+    expect($code)->toBe(1)
+        ->and(($this->text)())->toContain('extra.pyhp.overrides needs uv');
+});
