@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import enum
 import math
+import numbers
 from collections import OrderedDict
 
 import pytest
@@ -281,3 +283,44 @@ def test_records_with_repeated_keys_keep_every_rule(registry: Registry) -> None:
     result = encode(colliding, registry)
     assert isinstance(result, list)
     assert all(isinstance(item, dict) and item["$t"] == "ref" for item in result)
+
+
+class _WholeNumber:
+    """A whole-number type that isn't a Python int, like sympy.Integer."""
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def __index__(self) -> int:
+        return self.value
+
+    def __int__(self) -> int:
+        return self.value
+
+
+numbers.Integral.register(_WholeNumber)
+
+
+def test_integer_like_numbers_become_php_ints(registry: Registry) -> None:
+    assert encode(_WholeNumber(42), registry) == 42
+    assert encode([_WholeNumber(-7), 1], registry) == [-7, 1]
+    assert encode({"count": _WholeNumber(3)}, registry) == {"count": 3}
+    assert encode(_WholeNumber(5), registry, strict=True) == 5
+    assert len(registry) == 0
+
+
+def test_integer_like_numbers_outside_int64_stay_in_python(registry: Registry) -> None:
+    result = encode(_WholeNumber(2**64), registry)
+
+    assert isinstance(result, dict)
+    assert result["$t"] == "ref"
+
+
+def test_int_subclasses_still_stay_in_python_in_auto_mode(registry: Registry) -> None:
+    class Flag(enum.IntEnum):
+        ON = 1
+
+    result = encode(Flag.ON, registry)
+
+    assert isinstance(result, dict)
+    assert result["$t"] == "ref"
