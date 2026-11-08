@@ -82,6 +82,12 @@ final class Session
     /** @var list<Closure(Session): mixed> run after every worker start; see onStart() */
     private array $startHooks = [];
 
+    /** @var (Closure(string): mixed)|null receives printed output while calls run; see onOutput() */
+    private ?Closure $outputHandler = null;
+
+    /** The first exception an output handler threw during the current call; rethrown when it ends. */
+    private ?Throwable $outputError = null;
+
     public function __construct(private readonly Config $config = new Config)
     {
         $this->codec = new Codec($this);
@@ -205,6 +211,21 @@ final class Session
     }
 
     /**
+     * Sends what Python prints to $handler while calls run, chunk by chunk (about a
+     * line at a time), instead of echoing or capturing it. Pass null to go back to
+     * the session's output mode. If the handler throws, the call still finishes in
+     * Python and the exception is rethrown when it returns.
+     *
+     * @param  (Closure(string): mixed)|null  $handler
+     */
+    public function onOutput(?Closure $handler): self
+    {
+        $this->outputHandler = $handler;
+
+        return $this;
+    }
+
+    /**
      * Replaces the worker with a fresh one and runs the onStart hooks. Everything in
      * the old worker is gone; proxies to it throw StaleProxyException from now on.
      */
@@ -276,6 +297,9 @@ final class Session
 
         $releases = $this->pendingReleases;
         $message = ['op' => $op] + $fields;
+        if ($this->outputHandler !== null || $this->config->output === OutputMode::Echo) {
+            $message['stream'] = true; // ask for printed output while the call runs
+        }
         if ($releases !== []) {
             $message['release'] = $releases;
         }
@@ -296,6 +320,11 @@ final class Session
             $response = $this->awaitResponse($deadline, $timeout);
 
             $this->handleOutput($response['out'] ?? '');
+            if ($this->outputError !== null) {
+                $error = $this->outputError;
+                $this->outputError = null;
+                throw $error;
+            }
 
             if (($response['ok'] ?? false) !== true) {
                 throw $this->errorFrom($response['error'] ?? null);
@@ -310,6 +339,7 @@ final class Session
             $this->requestDepth--;
             if ($this->requestDepth === 0) {
                 $this->callbackErrors = [];
+                $this->outputError = null;
             }
             if ($this->worker !== null && ! $this->worker->isRunning()) {
                 $this->worker = null;
@@ -354,7 +384,17 @@ final class Session
         while (true) {
             $frame = Codec::fromJson($this->runningWorker()->receive($deadline, $timeout));
             $this->forgetCallbacks($frame['release_callbacks'] ?? null);
-            if (($frame['op'] ?? null) !== 'php_call') {
+            $op = $frame['op'] ?? null;
+            if ($op === 'output') {
+                $started = microtime(true);
+                $this->handleOutput($frame['text'] ?? '');
+                if ($deadline !== null) {
+                    $deadline += microtime(true) - $started; // PHP's time doesn't count against the timeout
+                }
+
+                continue;
+            }
+            if ($op !== 'php_call') {
                 return $frame;
             }
 
@@ -498,7 +538,13 @@ final class Session
         if (! is_string($output) || $output === '') {
             return;
         }
-        if ($this->config->output === OutputMode::Echo) {
+        if ($this->outputHandler !== null) {
+            try {
+                ($this->outputHandler)($output);
+            } catch (Throwable $error) {
+                $this->outputError ??= $error;
+            }
+        } elseif ($this->config->output === OutputMode::Echo) {
             echo $output;
         } else {
             $this->output .= $output;

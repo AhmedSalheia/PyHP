@@ -4,18 +4,24 @@
 
 Python has two kinds of output, and PyHP treats them differently.
 
-**Text printed to `sys.stdout`** (`print()`) during a call is collected and delivered **when the call finishes**:
+**Text printed to `sys.stdout`** (`print()`) during a call goes, depending on the session:
 
-* `OutputMode::Echo` (default) — `echo`ed into PHP's output, so it shows up in the CLI or the HTTP response.
-* `OutputMode::Capture` — kept in a buffer; read it with `$py->takeOutput()`.
+* `OutputMode::Echo` (default): `echo`ed into PHP's output **live**, about a line at a time while the call runs, so a long job's progress shows up as it happens in the CLI (or the HTTP response).
+* `OutputMode::Capture`: kept in a buffer and read with `$py->takeOutput()` after the call.
+* **`$py->onOutput(fn (string $text) => ...)`**: sent to your callback live, chunk by chunk, instead of echoing or capturing. Use it for progress bars, logs or pushing progress to a browser. `$py->onOutput(null)` goes back to the output mode.
 
-Output printed before a Python exception is delivered too.
+```php
+$py->onOutput(fn (string $text) => $logger->info(rtrim($text)));
+$py->exec('for i in range(3): print(f"epoch {i} done")');   // three log lines, as they happen
+```
+
+Chunks are sent when Python prints a newline or flushes (`print(..., flush=True)` for a progress counter on one line); text without a newline arrives at the latest when the call ends. Output printed before a Python exception is delivered too. If an `onOutput` callback throws, the Python call still runs to the end and the exception is rethrown when it returns. Time spent in the callback doesn't count against `timeout`.
 
 **Everything else goes to the worker log:** `sys.stderr`, `warnings`, logging handlers that write to stderr, output from C extensions writing directly to file descriptor 1 or 2, and output from background threads that print *between* calls. Read it with `$py->log()`. By default the log is a temp file deleted on `close()`. Set `log_file` to keep it.
 
 Limits:
 
-* **Output isn't streamed.** A 10-minute job's prints appear all at once when it ends. For progress reporting, write to the log, or to a file, from Python.
+* Only the thread that serves PHP sends live output. What background threads print during a call is sent with the next chunk from the main thread, or when the call ends.
 * **`input()` raises `EOFError`.** The worker has no stdin. Pass data in through `vars` or arguments.
 * Captured output counts toward `max_message_bytes`.
 

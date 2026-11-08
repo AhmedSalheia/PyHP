@@ -63,6 +63,7 @@ You can also build a `Config` directly with named arguments: `new Session(new Co
 | `$vars` | Global variables (see below). |
 | `$functions` | Global callables (see below). |
 | `takeOutput(): string` | In capture mode, the text printed since the last call to `takeOutput()`; then clears it. |
+| `onOutput(?Closure $handler): self` | Send printed output to `$handler(string $text)` live while calls run, instead of echoing or capturing it; `null` goes back to the output mode. See [Printed output](11-output-and-errors.md#printed-output-and-the-log). |
 | `log(): string` | Everything the worker wrote to stderr so far (warnings, crash output). |
 | `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `callbacks` (PHP closures Python holds), `pid`. |
 | `isOpen(): bool` | Whether the worker is running. |

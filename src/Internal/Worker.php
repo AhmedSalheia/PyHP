@@ -27,7 +27,7 @@ use PyHP\Exception\WorkerStartException;
  */
 final class Worker
 {
-    public const PROTOCOL_VERSION = 2;
+    public const PROTOCOL_VERSION = 3;
 
     private const POLL_SECONDS = 0.05;
 
