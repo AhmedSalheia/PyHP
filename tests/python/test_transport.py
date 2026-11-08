@@ -99,7 +99,7 @@ def test_worker_sends_hello_with_token_first(worker: Connection) -> None:
     hello = worker.receive()
     assert hello["op"] == "hello"
     assert hello["token"] == TOKEN
-    assert hello["protocol"] == 2
+    assert hello["protocol"] == 3
 
 
 def test_worker_answers_requests_and_keeps_state(worker: Connection) -> None:
