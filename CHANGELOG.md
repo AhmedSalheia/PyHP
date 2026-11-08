@@ -15,6 +15,9 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - `extra.pyhp.ignore-packages` skips a Composer package's Python requirements; `extra.pyhp.overrides` forces versions over everyone else's rules (uv only; with pip, `setup` stops with an explanation).
 - When the installer can't satisfy every rule, `pyhp setup` lists each Python package requested by more than one source and the Composer packages behind each rule.
 - `config.vendor-dir` in `composer.json` is respected when looking for installed packages.
+- `vendor/bin/pyhp lock`: resolves every Python requirement (the project's, Composer packages', overrides) and writes exact versions to `pyhp.lock`, for every operating system with uv (`uv pip compile --universal`) or for the current one with pip. `pyhp setup` installs exactly the locked versions and warns when the lock no longer matches the requirements; `pyhp info` reports whether it's up to date.
+- `pyhp setup --exact`: the venv ends up containing exactly what the lock (or the requirements) lists; other packages are removed (`uv pip sync`, or pip install plus uninstall).
+- The CI smoke test also covers a Composer package declaring its own Python requirement, `pyhp lock` and `pyhp setup --exact`, on all three systems.
 
 ### Changed
 - Whole numbers that aren't Python `int` (`sympy.Integer`, anything registered as `numbers.Integral`) now arrive in PHP as `int` when they fit in 64 bits, instead of as proxies: `solve()` returns `[2, 3]` and `$py->functions->int()` isn't needed. Larger values, `int` subclasses (`IntEnum`), fractions and high-precision floats still stay proxies.
