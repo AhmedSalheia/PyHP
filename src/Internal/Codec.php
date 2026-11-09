@@ -13,6 +13,7 @@ use PyHP\Session;
 use PyHP\Value\Dict;
 use PyHP\Value\Slice;
 use PyHP\Value\Tuple;
+use PyHP\Value\Vectorized;
 use stdClass;
 
 /**
@@ -107,6 +108,11 @@ final class Codec
             $value instanceof Slice => ['$t' => 'slice', 'v' => [$value->start, $value->stop, $value->step]],
             $value instanceof Dict => $this->encodeDict($value->items, $depth),
             $value instanceof Closure => ['$t' => 'callback', 'id' => $this->session->callbackId($value)],
+            $value instanceof Vectorized => [
+                '$t' => 'vectorize',
+                'fn' => ['$t' => 'callback', 'id' => $this->session->callbackId($value->callback)],
+                'batch' => $value->batchSize,
+            ],
             default => throw new ConversionException(sprintf(
                 'A PHP %s cannot be sent to Python. Send scalars, arrays, Python object proxies, '
                 .'or Py::tuple()/Py::slice()/Py::dict() values.',

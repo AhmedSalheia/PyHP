@@ -67,16 +67,40 @@ Nesting is limited to **32 levels** (PHP → Python → PHP → ...); deeper rai
 * PHP keeps a closure alive while Python holds it, and lets it go when Python drops it. `$py->info()['callbacks']` shows how many Python holds.
 * Closing the session inside a callback ends the outer call with `SessionClosedException` (or with the exception the callback threw).
 
-### Speed: prefer one callback per column, not per row
+### Speed: one callback per batch, not per value
 
-Each callback is one round trip (~65 µs on Linux), the same as any other call. Fine for an optimizer objective called 200 times; slow for a million rows:
+Each callback is one round trip (~65 µs on Linux), the same as any other call. Fine for an optimizer objective called 200 times; slow for a million rows. Three ways to transform 10,000 values, fastest last:
 
 | | 10,000 values |
 |---|---|
-| `$series->apply(fn ($x) => $x * 2)`: one callback per value | ~665 ms |
-| `$series->pipe(fn (PyObject $s) => $s->mul(2))`: one callback, pandas does the loop | ~0.7 ms |
+| `$series->apply(fn ($x) => $x * 2)`: one callback per value | ~780 ms |
+| `$series->pipe(Py::vectorize(fn ($x) => $x * 2, elementwise: true))`: one callback per 1,000 values | ~12 ms |
+| `$series->pipe(fn (PyObject $s) => $s->mul(2))`: one callback, pandas does the loop | ~1.4 ms |
 
-`pipe()` passes the whole Series (as a proxy) to your closure once, and you use pandas methods on it. When you need per-value logic on big data, write that function in Python instead.
+#### `Py::vectorize()`: PHP logic, a round trip per batch
+
+When the logic has to stay in PHP (your own validation rules, a PHP library, a lookup in your app), `Py::vectorize()` wraps the closure so Python sends it values in batches instead of one at a time:
+
+```php
+use PyHP\Py;
+
+// Per value: write the closure as usual and add elementwise: true.
+$clean = $names->pipe(Py::vectorize(fn (string $name) => ucfirst(trim($name)), elementwise: true));
+
+// Per batch: the closure gets a PHP list and returns a list of the same length.
+$scores = $texts->pipe(Py::vectorize(
+    fn (array $batch): array => $sentiment->scoreMany($batch),
+    batchSize: 500,
+));
+```
+
+* Use it with `->pipe()`, which hands the whole Series to the wrapped closure. Any Python function that calls `f(data)` once works too.
+* A pandas Series comes back as a Series with the **same index and name**, so it lines up with its DataFrame: `$df['clean'] = $df['name']->pipe(...)`. A NumPy array comes back as an array; anything else iterable (a list, a tuple, a generator) as a list.
+* The batch closure must return exactly one value per input value, as a list. After `array_filter()` use `array_values()`; a wrong count raises `ValueError` in Python, which arrives as a `PythonException`.
+* `batchSize` defaults to 1,000 values. Bigger batches mean fewer round trips but more memory per call; past a few thousand there's little left to gain.
+* The value `Py::vectorize()` returns can be reused for many columns and sessions.
+
+When the logic doesn't need PHP, write it with pandas methods or in Python: that's still ten times faster than any callback.
 
 ---
 

@@ -40,16 +40,18 @@ try {
     echo 'Caught in PHP: '.$e->getMessage()."\n";
 }
 
-// 4. pandas: one callback per value (simple) vs. one per column (fast).
+// 4. pandas: one callback per value (simple), per batch (Py::vectorize) or per column (fastest).
 $hasPandas = $py->eval("__import__('importlib.util').util.find_spec('pandas') is not None");
 if ($hasPandas === true) {
     $pd = $py->import('pandas');
     $names = $pd->Series(['ahmed', 'sam', 'lina']);
-    echo 'apply: '.json_encode($names->apply(ucfirst(...))->tolist())."\n";
+    echo 'apply:     '.json_encode($names->apply(ucfirst(...))->tolist())."\n";
+    $batched = $names->pipe(Py::vectorize(ucfirst(...), elementwise: true));
+    echo 'vectorize: '.json_encode($batched->tolist())."\n";
 
     $scores = $pd->Series([7, 9, 8]);
     $curved = $scores->pipe(fn (PyObject $s) => $s->mul(10)->clip(upper: 85));
-    echo 'pipe:  '.json_encode($curved->tolist())."\n";
+    echo 'pipe:      '.json_encode($curved->tolist())."\n";
 }
 
 $py->close();

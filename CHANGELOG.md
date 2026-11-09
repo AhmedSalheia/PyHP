@@ -13,6 +13,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - `Py::shared($name, $setup)`: one long-lived, self-healing session per name for queue workers and app servers, and `Py::closeShared()`.
 - `StaleProxyException`: proxies from before a restart are refused, instead of reaching unrelated objects in the new worker; their releases are dropped so they can't free objects in it.
 - Live output: what Python prints reaches PHP while a call runs, about a line at a time. `Session::onOutput()` sends it to a callback (progress bars, logs) instead of echoing or capturing it.
+- `Py::vectorize()`: a PHP closure that Python calls once per batch of values (1,000 by default) instead of once per value, about 60 times faster than `apply()` on a Series; `elementwise: true` wraps a per-value closure. Used with `->pipe()`, a pandas Series comes back with its index and name.
 
 ### Changed
 - Echo mode (the default) prints Python's output live while the call runs instead of all at once when it ends. Wire protocol version 3.
