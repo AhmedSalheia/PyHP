@@ -155,7 +155,7 @@ Problems:
 
 It exits with code 0 when everything looks fine and 1 when it found problems, so CI and deploy scripts can run it as a check.
 
-`info` reports what PyHP picks **when your code doesn't choose**. If your application sets the `python` option (`Py::config(['python' => ...])`), that interpreter is used instead. `Config::locatePython()` returns the same answer as `info` from PHP code: the interpreter, the reason (`PythonSource`) and the venv folder.
+`info` reports what PyHP picks **when your code doesn't choose**. If your application sets the `python` option (`Py::config(['python' => ...])`), that interpreter is used instead. `Config::detectPython()` returns the same interpreter from PHP code.
 
 ## Exit codes
 

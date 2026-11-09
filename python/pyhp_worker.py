@@ -101,7 +101,7 @@ class PhpError(Exception):
         super().__init__(f"{php_class}: {php_message}" if php_message else php_class)
         self.php_class = php_class
         self.php_message = php_message
-        self.error_id = error_id
+        self._error_id = error_id  # which PHP exception to rethrow; a protocol detail
 
 
 PhpError.__module__ = PUBLIC_MODULE
@@ -279,7 +279,7 @@ def _encode(value: object, state: _EncodeState, depth: int) -> Json:  # fast pat
         return scalar
 
     if isinstance(value, PhpCallable):
-        return state.tag({"$t": "callback", "id": value.callback_id})
+        return state.tag({"$t": "callback", "id": value._callback_id})
 
     if _is_container(value, state.strict):
         if id(value) in state.path or depth >= MAX_DEPTH:
@@ -600,7 +600,7 @@ class PhpVectorized:
         return _shaped_like(data, results)
 
     def __repr__(self) -> str:
-        return f"<vectorized PHP callback {self.function.callback_id}, batch {self.batch_size}>"
+        return f"<vectorized PHP callback {self.function._callback_id}, batch {self.batch_size}>"
 
 
 def _shaped_like(data: object, results: list[object]) -> object:
@@ -619,17 +619,17 @@ def _shaped_like(data: object, results: list[object]) -> object:
 class PhpCallable:
     """A PHP closure that Python code can call like a function."""
 
-    __slots__ = ("__weakref__", "_session", "callback_id")
+    __slots__ = ("__weakref__", "_callback_id", "_session")
 
     def __init__(self, session: Session, callback_id: int) -> None:
         self._session = session
-        self.callback_id = callback_id
+        self._callback_id = callback_id
 
     def __call__(self, *args: object, **kwargs: object) -> object:
-        return self._session.call_php(self.callback_id, args, kwargs)
+        return self._session.call_php(self._callback_id, args, kwargs)
 
     def __repr__(self) -> str:
-        return f"<PHP callback #{self.callback_id}>"
+        return f"<PHP callback #{self._callback_id}>"
 
 
 PhpCallable.__module__ = PUBLIC_MODULE
@@ -1201,7 +1201,7 @@ def _error_response(
     }
     if isinstance(error, PhpError):
         # Lets PHP rethrow the original PHP exception object.
-        details["php_error"] = error.error_id
+        details["php_error"] = error._error_id
     if with_traceback:
         # Drop the worker's own frames so the traceback starts at user code.
         tb = error.__traceback__

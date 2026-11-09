@@ -39,12 +39,12 @@ use Stringable;
  */
 final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
 {
-    /**
-     * @internal Proxies are created by PyHP when Python returns an object.
-     */
     /** The worker generation this object lives in; see Session::restart(). */
     private readonly int $generation;
 
+    /**
+     * @internal Proxies are created by PyHP when Python returns an object.
+     */
     public function __construct(
         private readonly Session $session,
         private readonly int $id,

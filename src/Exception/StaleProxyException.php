@@ -7,6 +7,7 @@ namespace PyHP\Exception;
 /** A proxy was used after its session restarted the worker, so the Python object it stood for is gone. */
 final class StaleProxyException extends PyHPException
 {
+    /** @internal Thrown by PyHP; catch the exception, don't create it. */
     public static function restarted(): self
     {
         return new self(

@@ -12,6 +12,8 @@ use RuntimeException;
  * by `pyhp lock` and installed by `pyhp setup`. A header line records a
  * fingerprint of the requirements it was resolved from, so setup and info can
  * tell when it's out of date.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
 final class LockFile
 {

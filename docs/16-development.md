@@ -73,6 +73,22 @@ macOS runners are free for public repositories. For private ones they use your A
 
 TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level max, `mypy --strict`, Ruff (`E,F,W,I,B,UP,N,S,ANN,SIM,RUF`), and fail-loudly exceptions. The worker stays standard-library-only.
 
+### The public API list
+
+`tests/php/public-api.txt` lists PyHP's public API: every public class, constant, property and method in `src/` that isn't marked `@internal`, with parameter names (named arguments make them part of the API), types and defaults. `tests/php/PublicApiTest.php` fails whenever the code and the list differ, so nothing enters or leaves the public API by accident.
+
+* Adding to the public API: update the list and add the change to `CHANGELOG.md`.
+* Changing or removing something in it is a **breaking change**: after 1.0 it needs a deprecation first, and always an upgrade note in the CHANGELOG.
+* Code that users shouldn't call gets `@internal` in its docblock. Everything in `PyHP\Internal`, `PyHP\Setup` and `PyHP\Console` is internal.
+
+To update the list after an intended change:
+
+```bash
+PYHP_UPDATE_API=1 vendor/bin/pest tests/php/PublicApiTest.php
+```
+
+On Windows PowerShell: `$env:PYHP_UPDATE_API = '1'; vendor/bin/pest tests/php/PublicApiTest.php; Remove-Item Env:PYHP_UPDATE_API`.
+
 ---
 
 ← [How PyHP works inside](15-internals.md) · [Contents](README.md)

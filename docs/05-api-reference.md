@@ -67,7 +67,7 @@ You can also build a `Config` directly with named arguments: `new Session(new Co
 | `onOutput(?Closure $handler): self` | Send printed output to `$handler(string $text)` live while calls run, instead of echoing or capturing it; `null` goes back to the output mode. See [Printed output](11-output-and-errors.md#printed-output-and-the-log). |
 | `log(): string` | Everything the worker wrote to stderr so far (warnings, crash output). |
 | `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `callbacks` (PHP closures Python holds), `pid`. |
-| `isOpen(): bool` | Whether the worker is running. |
+| `isOpen(): bool` | Whether the worker is running right now. After a crash or timeout it's `false` even with `auto_restart` on, although the next call would start a fresh worker; use `ping()` to check and restart in one step. |
 | `ping(): bool` | Whether the worker answers a request (restarting it first when `auto_restart` is on). |
 | `onStart(Closure $hook): self` | Runs `$hook($session)` now and after every restart: put imports, models and variables the session needs here. |
 | `restart(): void` | Replace the worker with a fresh one and run the `onStart` hooks. Proxies from before throw `StaleProxyException`. Not allowed inside a PHP callback. |

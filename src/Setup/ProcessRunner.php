@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace PyHP\Setup;
 
-/** Runs programs directly (no shell) with proc_open. Meant for the command line. */
+/**
+ * Runs programs directly (no shell) with proc_open. Meant for the command line.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
+ */
 final class ProcessRunner implements CommandRunner
 {
     /** Exit code reported when a program can't be started at all, as shells do. */

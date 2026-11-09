@@ -10,7 +10,11 @@ use PyHP\Setup\CommandRunner;
 use PyHP\Setup\Installer;
 use PyHP\Setup\SetupConfig;
 
-/** The `vendor/bin/pyhp` command line tool. */
+/**
+ * The `vendor/bin/pyhp` command line tool.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
+ */
 final class Application
 {
     /** Exit code when the command failed or found problems. */
