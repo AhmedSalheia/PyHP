@@ -67,10 +67,10 @@ test('setup --no-uv uses the system Python', function (): void {
     expect(implode('', $this->output->getArrayCopy()))->toContain('> /usr/bin/python3 -m venv');
 });
 
-test('unknown commands and options fail with a message on stderr', function (array $args, string $message): void {
+test('wrong usage exits with 2 and a message on stderr', function (array $args, string $message): void {
     $code = ($this->app)(new FakeCommandRunner)->run($args, $this->root);
 
-    expect($code)->toBe(1)
+    expect($code)->toBe(2)
         ->and(implode('', $this->errors->getArrayCopy()))->toContain($message);
 })->with([
     'unknown command' => [['install'], 'Unknown command "install"'],
@@ -120,7 +120,7 @@ test('pyhp lock runs the resolver with the command line options', function (): v
 test('pyhp lock rejects setup-only options', function (): void {
     $code = ($this->app)(new FakeCommandRunner)->run(['lock', '--exact'], $this->root);
 
-    expect($code)->toBe(1)
+    expect($code)->toBe(2)
         ->and(implode('', $this->errors->getArrayCopy()))->toContain('Unknown option "--exact" for lock');
 });
 
