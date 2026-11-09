@@ -10,6 +10,8 @@ use Closure;
  * Builds a project's Python environment: a virtual environment plus the
  * packages the project needs. Uses uv when it's installed (fast, and it can
  * download any Python version), otherwise the system Python with venv and pip.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
 final class Installer
 {

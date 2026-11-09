@@ -11,6 +11,8 @@ use PyHP\Exception\ConfigException;
  * Every Python requirement of a project: its own (extra.pyhp in composer.json, or a
  * requirements file) plus those declared by installed Composer packages in their
  * own extra.pyhp, read from vendor/composer/installed.json.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
 final class ProjectRequirements
 {

@@ -8,7 +8,12 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+### Added
+- `tests/php/public-api.txt` and `PublicApiTest`: the public API is listed (classes, constants, properties, methods with parameter names, types and defaults), and the tests fail when it changes without the list being updated. See [Development](docs/16-development.md#the-public-api-list).
+
 ### Changed
+- Marked as internal (`@internal`), outside the compatibility promise: every class in `PyHP\Setup` and `PyHP\Console` (use `vendor/bin/pyhp` instead), `Config::locatePython()` (use `Config::detectPython()`), `Value\Vectorized::$callback` and `StaleProxyException::restarted()`. `PyObject`'s constructor was meant to be internal already; its marker now actually applies.
+- Python side: `PhpError.error_id` and `PhpCallable.callback_id` are now `_error_id` and `_callback_id`; they are protocol details. `pyhp.PhpError` (`php_class`, `php_message`) and `pyhp.PhpCallable` stay public.
 - **Breaking:** `Py::shared()` needs a name: `Py::shared('reports', ...)`. Without one it gave a session called "default" that wasn't `Py::default()`. *Upgrade:* pass the name you want; `Py::shared('default')` behaves as before.
 - **Breaking:** `Session::config()` is now `Session::configuration()`, matching `Py::configuration()` (`Py::config()` changes the configuration, it doesn't read it). *Upgrade:* rename the call.
 - **Breaking:** the `restart` option is now `auto_restart` (`autoRestart` as a `Config` argument and property), so it isn't confused with `Session::restart()`. The old key throws `ConfigException` saying what it was renamed to. *Upgrade:* `['restart' => true]` becomes `['auto_restart' => true]`.

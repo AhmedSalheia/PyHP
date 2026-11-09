@@ -119,8 +119,8 @@ Breaking (each with a CHANGELOG upgrade note):
 - [x] CLI: exit code 2 for wrong usage.
 
 Non-breaking:
-- [ ] `@internal` on `Config::locatePython()`, `Vectorized::$callback`, every class in `PyHP\Setup` and `PyHP\Console`; fix the misplaced `@internal` on `PyHP\PyObject::__construct`.
-- [ ] Python: `PhpError.error_id` → `_error_id`, `PhpCallable.callback_id` → `_callback_id`.
-- [ ] Docs: what `isOpen()` means with `auto_restart` on.
-- [ ] A test that lists the public API (public classes and methods without `@internal`) and fails when it changes without the list being updated, so nothing slips into or out of the promise by accident.
+- [x] `@internal` on `Config::locatePython()`, `Vectorized::$callback`, every class in `PyHP\Setup` and `PyHP\Console`; fix the misplaced `@internal` on `PyHP\PyObject::__construct`.
+- [x] Python: `PhpError.error_id` → `_error_id`, `PhpCallable.callback_id` → `_callback_id`.
+- [x] Docs: what `isOpen()` means with `auto_restart` on.
+- [x] A test that lists the public API (public classes and methods without `@internal`) and fails when it changes without the list being updated, so nothing slips into or out of the promise by accident.
 - [ ] Compatibility promise page (section 1 of this review, polished) in `docs/`.

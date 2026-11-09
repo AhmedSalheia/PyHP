@@ -8,9 +8,9 @@ Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; release candidates firs
 
 ### Today: 2026-11-09
 - [r] Breaking cleanups from the API review: `Py::shared()` name required, `Session::configuration()`, option `auto_restart`, CLI exit code 2 for wrong usage (branch: feature/api-cleanups)
+- [r] `@internal` on everything that isn't public API, the public API list and its guard test (branch: chore/internal-api)
 
 ### Backlog (this scope)
-- [ ] `@internal` on everything that isn't public API (Setup, Console, `Config::locatePython()`, ...) and a test that guards the public API list
 - [ ] Compatibility promise: docs page on what is public, SemVer and the deprecation rule
 - [ ] Wire protocol: document every frame (the clear error on a version mismatch already exists)
 - [ ] CI matrix: oldest and newest supported PHP and Python on Linux, Windows and macOS

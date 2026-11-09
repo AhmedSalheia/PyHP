@@ -110,6 +110,8 @@ final readonly class Config
      * Like detectPython(), but also says which rule picked the interpreter and
      * where the project's venv is expected (null when there's no Composer project).
      *
+     * @internal Used by `pyhp info`; call detectPython() instead.
+     *
      * @param  string|null  $projectRoot  null means the root of the Composer project PyHP is installed in
      */
     public static function locatePython(?string $projectRoot = null): PythonLocation

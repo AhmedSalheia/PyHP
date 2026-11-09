@@ -23,6 +23,8 @@ use PyHP\Setup\SetupConfig;
 /**
  * `pyhp info`: everything worth knowing when PyHP doesn't work as expected,
  * from PHP and the chosen interpreter to missing packages and a live worker test.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
 final class InfoCommand
 {
