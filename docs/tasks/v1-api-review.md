@@ -123,4 +123,4 @@ Non-breaking:
 - [x] Python: `PhpError.error_id` → `_error_id`, `PhpCallable.callback_id` → `_callback_id`.
 - [x] Docs: what `isOpen()` means with `auto_restart` on.
 - [x] A test that lists the public API (public classes and methods without `@internal`) and fails when it changes without the list being updated, so nothing slips into or out of the promise by accident.
-- [ ] Compatibility promise page (section 1 of this review, polished) in `docs/`.
+- [x] Compatibility promise page (section 1 of this review, polished) in `docs/`: [17-compatibility.md](../17-compatibility.md).

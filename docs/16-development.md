@@ -91,4 +91,4 @@ On Windows PowerShell: `$env:PYHP_UPDATE_API = '1'; vendor/bin/pest tests/php/Pu
 
 ---
 
-← [How PyHP works inside](15-internals.md) · [Contents](README.md)
+← [How PyHP works inside](15-internals.md) · [Contents](README.md) · [Versions and compatibility](17-compatibility.md) →

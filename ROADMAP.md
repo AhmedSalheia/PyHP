@@ -39,7 +39,7 @@ PyHP becomes comfortable in production setups where PHP processes live for a lon
 
 The goal of 1.0 is trust: people can build products on PyHP without fearing breaking changes.
 
-Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; the way there is release candidates (`1.0.0-rc1`, more if needed, then `1.0.0`); production use is a soft goal (PyHP used in Ahmed's own real projects, feedback folded in), not a gate waiting for outside adopters; the docs website is VitePress on GitHub Pages; support stays PHP 8.2+ (64-bit) and Python 3.10+.
+Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; the way there is release candidates (`1.0.0-rc1`, more if needed, then `1.0.0`); production use is a soft goal (PyHP used in Ahmed's own real projects, feedback folded in), not a gate waiting for outside adopters; the docs website is VitePress on GitHub Pages; support stays PHP 8.2+ (64-bit) and Python 3.10+. Deprecations warn with `E_USER_DEPRECATED` for at least one minor release; end-of-life PHP and Python versions may be dropped in a minor release; fixes go into the latest minor release only (see [docs/17-compatibility.md](docs/17-compatibility.md)).
 
 1. **Public API review.** Every public class, method, option and exception is listed, checked for consistent naming and behaviour, and either kept, renamed or marked `@internal`. Breaking cleanups happen now, before the freeze, each one in the CHANGELOG with how to upgrade.
 2. **A written compatibility promise.** What counts as public API, what SemVer means for PyHP (PHP API, `extra.pyhp` keys, CLI commands and exit codes, the Python-side `pyhp` module), and the deprecation rule: nothing public is removed without a deprecation in a minor release first.
