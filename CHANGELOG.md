@@ -8,6 +8,9 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+### Changed
+- Roadmap: 1.0.0 (a reviewed, frozen API with release candidates first) now comes before `pyhp/laravel`, so the Laravel package builds on a stable API.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

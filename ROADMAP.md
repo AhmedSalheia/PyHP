@@ -9,8 +9,8 @@ Goal: make Python's libraries (data analysis, science, NLP, machine learning, an
 | 3 | Tooling | v0.2.0 | released 2026-11-07 | `pyhp setup` (uv or venv/pip), `pyhp info`, automatic `.venv` detection, `Py::ref()`, examples 06–11, numbered docs. |
 | 4 | Ecosystem and data fidelity | v0.3.0 | released 2026-11-08 | Python requirements declared by any Composer package, exact environments, lossless numbers, real-world setup tests. |
 | 5 | Long-running PHP | v0.4.0 | released 2026-11-09 | Worker recovery, shared sessions for queue workers and app servers, live output, faster callbacks. |
-| 6 | Laravel | pyhp/laravel v0.1.0 | in progress | A separate package built on 0.4: service provider, config, facade, artisan commands. |
-| 7 | Stable | v1.0.0 | goal | Frozen public API and protocol, documented guarantees, docs website, proven in production. |
+| 6 | Stable | v1.0.0 | in progress | Reviewed and frozen public API and protocol, a written compatibility promise, quality bars, a docs website; release candidates first. |
+| 7 | Laravel | pyhp/laravel v0.1.0 | planned (after 1.0) | A separate package built on a stable PyHP: service provider, config, facade, artisan commands. |
 
 ## v0.3.0: Ecosystem and data fidelity
 
@@ -33,18 +33,21 @@ PyHP becomes comfortable in production setups where PHP processes live for a lon
 2. **Session reuse.** `Py::shared($name, $setup)`: one self-healing session per process and name for queue workers, Laravel Octane, RoadRunner and FrankenPHP, so expensive imports and models load once per process instead of once per job. A session pool can follow if someone needs it.
 3. **Live output.** Optionally stream what Python prints to PHP while a call runs (a callback), instead of only when it ends. Useful for long jobs and progress bars.
 4. **Faster callbacks.** `Py::vectorize()`: a PHP closure applied to a whole column or array in batches, one round trip per batch instead of per value.
-`pyhp/laravel` moved to its own release right after 0.4.0 (decided 2026-11-08): a separate package with a service provider, config file, facade, `php artisan pyhp:setup` and `pyhp:info`, and session lifetime that matches the request or the worker, built on 0.4's shared sessions and 0.3's per-package requirements.
+`pyhp/laravel` moved to its own release right after 0.4.0 (decided 2026-11-08): a separate package with a service provider, config file, facade, `php artisan pyhp:setup` and `pyhp:info`, and session lifetime that matches the request or the worker, built on 0.4's shared sessions and 0.3's per-package requirements. On 2026-11-09 it moved again, to after 1.0, so it builds on a frozen API.
 
 ## v1.0.0: Stable
 
 The goal of 1.0 is trust: people can build products on PyHP without fearing breaking changes.
 
-- **Frozen public API.** Everything public is reviewed, named consistently and documented; `@internal` marks the rest. From 1.0 on, breaking changes only happen in a new major version, after a deprecation period.
-- **Stable wire protocol**, versioned and documented, so the worker and the PHP side can evolve safely.
-- **Verified everywhere it claims to work.** CI on Linux, Windows and macOS for every supported PHP (8.2+) and Python (3.10+) version, including the newest releases.
-- **Quality bars.** Coverage stays above 80% (aiming for 90%), mutation testing on the core, PHPStan max and mypy strict, a security review of the worker and its socket handling.
-- **Documentation website** built from `docs/`, with guides for common libraries and frameworks, and published benchmarks.
-- **Proven in production** by real projects, with feedback folded in before the API is frozen.
+Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; the way there is release candidates (`1.0.0-rc1`, more if needed, then `1.0.0`); production use is a soft goal (PyHP used in Ahmed's own real projects, feedback folded in), not a gate waiting for outside adopters; the docs website is VitePress on GitHub Pages; support stays PHP 8.2+ (64-bit) and Python 3.10+.
+
+1. **Public API review.** Every public class, method, option and exception is listed, checked for consistent naming and behaviour, and either kept, renamed or marked `@internal`. Breaking cleanups happen now, before the freeze, each one in the CHANGELOG with how to upgrade.
+2. **A written compatibility promise.** What counts as public API, what SemVer means for PyHP (PHP API, `extra.pyhp` keys, CLI commands and exit codes, the Python-side `pyhp` module), and the deprecation rule: nothing public is removed without a deprecation in a minor release first.
+3. **Stable wire protocol.** The protocol is documented frame by frame, with a version handshake that fails clearly on a mismatch; changes after 1.0 stay backward-compatible within a major version.
+4. **Verified everywhere it claims to work.** CI on Linux, Windows and macOS for the oldest and newest supported PHP (8.2 and the newest release) and Python (3.10 and the newest release), plus the real-world setup tests.
+5. **Quality bars.** Coverage stays above 80%, aiming for 90%; mutation testing on the core (Infection for PHP, mutmut for Python); PHPStan max, mypy strict; a security review of the worker and its socket handling.
+6. **Documentation website.** VitePress built from `docs/` and published to GitHub Pages by CI, with search, guides for common libraries and long-running PHP, an upgrade guide, and published benchmarks.
+7. **Release candidates.** `1.0.0-rc1` once the API is frozen; only fixes after that; `1.0.0` when an RC has been used in real projects without API changes.
 
 ## Parking lot
 
