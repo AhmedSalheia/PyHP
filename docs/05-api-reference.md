@@ -16,6 +16,7 @@
 | `Py::exec()`, `Py::execFile()`, `Py::eval()`, `Py::import()`, `Py::vars()`, `Py::functions()`, `Py::modules()`, `Py::classes()` | Shortcuts to the same methods on `Py::default()`. |
 | `Py::tuple(...$items)` | A value sent as a Python `tuple`. |
 | `Py::slice($start, $stop = null, $step = null)` | A value sent as a Python `slice`: `Py::slice(1, 3)` is `1:3`, `Py::slice(null, null, -1)` is `::-1`. |
+| `Py::vectorize(Closure $callback, bool $elementwise = false, int $batchSize = 1000): Vectorized` | A PHP closure Python calls once per batch of values instead of once per value; use it with `->pipe()`. pandas Series keep their index and name. See [Speed](09-php-callbacks.md#pyvectorize-php-logic-a-round-trip-per-batch). |
 | `Py::dict(array $items)` | A value sent as a Python `dict`, even if the array is empty or list-shaped. |
 | `Py::len(PyObject $o): int` | Python `len(o)`. |
 | `Py::repr(PyObject $o): string` | Python `repr(o)`. |

@@ -10,6 +10,7 @@ use PyHP\Internal\Codec;
 use PyHP\Value\Dict;
 use PyHP\Value\Slice;
 use PyHP\Value\Tuple;
+use PyHP\Value\Vectorized;
 
 /**
  * Static entry point.
@@ -158,6 +159,20 @@ final class Py
     public static function functions(): Functions
     {
         return self::default()->functions;
+    }
+
+    /**
+     * A PHP closure that Python applies in chunks: one round trip per chunk of
+     * $batchSize values instead of one per value. Without $elementwise the closure
+     * receives a chunk (a list) and returns one value per item; with it, it receives
+     * single values, like array_map(). Use it wherever Python calls a function with
+     * the whole data, e.g. $series->pipe(Py::vectorize(ucfirst(...), elementwise: true)).
+     * A pandas Series comes back with its index and name, a NumPy array as an array,
+     * anything else iterable as a list.
+     */
+    public static function vectorize(Closure $callback, bool $elementwise = false, int $batchSize = 1000): Vectorized
+    {
+        return new Vectorized($callback, $elementwise, $batchSize);
     }
 
     /** A Python tuple, e.g. for $df->loc[Py::tuple($rows, 'col')] or $array[Py::tuple(0, 1)]. */

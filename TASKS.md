@@ -7,13 +7,13 @@ Goal: PyHP is comfortable in production setups where PHP processes live for a lo
 Decisions (2026-11-08): restart is opt-in (`restart` option; the failed call still throws, the next one gets a fresh worker and the `onStart` hooks); session reuse is one shared session per process and name (`Py::shared()`), a pool can come later; `pyhp/laravel` moves to its own release after 0.4.0. Live output: echo mode prints live, capture stays as it is, `onOutput()` sends chunks to a callback. `Py::vectorize()`: chunk closures and `elementwise: true`, used with `->pipe()`, keeps the Series index, default batch 1,000.
 
 ### Today: 2026-11-08
-- [r] Live output: echo prints live, `onOutput()` callback (branch: feature/live-output)
+- [r] `Py::vectorize()`: chunk closures and `elementwise: true`, keeps the Series index (branch: feature/vectorize)
 
 ### Backlog (this scope)
-- [ ] `Py::vectorize()`: apply a PHP closure to a whole column or array in batches
 - [ ] Docs, CHANGELOG and release 0.4.0
 
 ### Done (this scope)
+- [x] Live output: echo prints live, `onOutput()` callback (PR #34)
 - [x] Worker recovery and shared sessions (PR #33)
 - [x] Design decisions agreed (2026-11-08)
 

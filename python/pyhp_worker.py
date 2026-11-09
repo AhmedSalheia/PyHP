@@ -439,6 +439,13 @@ def decode(  # one flat tag switch
             msg = "PHP callbacks can only be used inside a session"
             raise ConversionError(msg)
         return callbacks(_require_int(data.get("id"), "callback id"))
+    if tag == "vectorize":
+        function = decode(data.get("fn"), registry, callbacks)
+        batch = _require_int(data.get("batch"), "batch size")
+        if not isinstance(function, PhpCallable) or batch < 1:
+            msg = "Py::vectorize() needs a PHP closure and a batch size of at least 1"
+            raise ConversionError(msg)
+        return PhpVectorized(function, batch)
     if tag == "dict":
         result: dict[object, object] = {}
         for pair in _require_list(raw, "dict pairs"):
@@ -555,6 +562,58 @@ class _LiveOutput(io.StringIO):
             self._pending = [rest] if rest else []
         for start in range(0, len(ready), OUTPUT_CHUNK):
             self._bridge.send_call({"op": "output", "text": ready[start : start + OUTPUT_CHUNK]})
+
+
+class PhpVectorized:
+    """Py::vectorize(): a PHP closure applied to data in chunks, one round trip per chunk.
+
+    Called with a pandas Series, it returns a Series with the same index and name;
+    with a NumPy array, an array; with anything else iterable, a list. The PHP
+    closure receives each chunk as an array and returns an array of the same size.
+    """
+
+    __slots__ = ("batch_size", "function")
+
+    def __init__(self, function: PhpCallable, batch_size: int) -> None:
+        self.function = function
+        self.batch_size = batch_size
+
+    def __call__(self, data: Iterable[object]) -> object:
+        values = list(data)
+        results: list[object] = []
+        for start in range(0, len(values), self.batch_size):
+            chunk = values[start : start + self.batch_size]
+            answer = self.function(chunk)
+            if not isinstance(answer, list):
+                msg = (
+                    "a vectorized PHP callback must return an array with one value per input "
+                    f"value (a list: use array_values() after filtering), got {type_name(answer)}"
+                )
+                raise TypeError(msg)
+            if len(answer) != len(chunk):
+                msg = (
+                    f"the vectorized PHP callback returned {len(answer)} values "
+                    f"for a chunk of {len(chunk)}"
+                )
+                raise ValueError(msg)
+            results.extend(answer)
+        return _shaped_like(data, results)
+
+    def __repr__(self) -> str:
+        return f"<vectorized PHP callback {self.function.callback_id}, batch {self.batch_size}>"
+
+
+def _shaped_like(data: object, results: list[object]) -> object:
+    """The results as the same kind of container as the input, where that matters."""
+    pandas = sys.modules.get("pandas")
+    series = getattr(pandas, "Series", None)
+    if isinstance(series, type) and isinstance(data, series):
+        return series(results, index=getattr(data, "index", None), name=getattr(data, "name", None))
+    numpy = sys.modules.get("numpy")
+    ndarray = getattr(numpy, "ndarray", None)
+    if isinstance(ndarray, type) and isinstance(data, ndarray):
+        return getattr(numpy, "array")(results)  # noqa: B009  # numpy is only imported by user code
+    return results
 
 
 class PhpCallable:
