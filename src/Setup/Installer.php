@@ -18,7 +18,7 @@ final class Installer
     /** Prints "major.minor" of the interpreter it runs in. */
     public const VERSION_PROBE = 'import sys; print("%d.%d" % sys.version_info[:2])';
 
-    public const MIN_PYTHON = '3.10';
+    public const MIN_PYTHON = '3.11';
 
     public const UV_INSTALL_URL = 'https://docs.astral.sh/uv/getting-started/installation/';
 

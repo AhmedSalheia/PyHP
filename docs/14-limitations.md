@@ -41,7 +41,7 @@
 **Environment**
 
 25. The optional library suites (SymPy, spaCy, matplotlib, Pillow, scikit-learn) run in CI on Linux only; pandas and NumPy run on every system; other libraries aren't tested by PyHP at all (see [Platform support](13-deployment-and-security.md#platform-support)).
-26. 64-bit PHP 8.2+ and Python 3.10+ only.
+26. 64-bit PHP 8.2+ and Python 3.11+ only.
 27. Not a sandbox. Trusted code only.
 28. `multiprocessing` from session code is untested. Functions defined inside the session (rather than in importable modules) can't be pickled into child processes on Windows/macOS (`spawn`).
 

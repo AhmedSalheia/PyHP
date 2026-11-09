@@ -36,7 +36,7 @@ Everything PyHP throws extends `PyHP\Exception\PyHPException`.
 | *your own exception* | A [PHP callback](09-php-callbacks.md#php-callbacks) threw and Python didn't catch it: the original object is rethrown. | ✅ still usable |
 | `MessageTooLargeException` | A request or result is bigger than `max_message_bytes`. | ✅ still usable |
 | `ConfigException` | Invalid option (unknown key, wrong type, bad value). | n/a: thrown before starting |
-| `WorkerStartException` | Python couldn't be started: interpreter not found, crashed during start-up (e.g. Python < 3.10), didn't connect within `startup_timeout`. The message includes the exit code and the worker log. | n/a: never started |
+| `WorkerStartException` | Python couldn't be started: interpreter not found, crashed during start-up (e.g. Python older than 3.11), didn't connect within `startup_timeout`. The message includes the exit code and the worker log. | n/a: never started |
 | `TimeoutException` | One call took longer than `timeout`. **The worker is killed** because a running Python call can't be interrupted safely. | ❌ closed, all state lost; with `auto_restart`, the next call gets a fresh worker |
 | `WorkerCrashedException` | The worker process died: `os._exit()`, a segfault in a native library, killed by the OS (out of memory). The message includes the log tail. | ❌ closed; with `auto_restart`, the next call gets a fresh worker |
 | `SessionClosedException` | You used a session, or a proxy, after `close()`, or after a crash or timeout without the `auto_restart` option. | ❌ closed |

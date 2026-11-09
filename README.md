@@ -39,7 +39,7 @@ vendor/bin/pyhp info      # check that everything is in place
 
 Starting a new project? `composer create-project pyhp/starter my-app` gives you a working app with pandas, matplotlib, a web page, tests and a lock file ([pyhp-php/starter](https://github.com/pyhp-php/starter)).
 
-PyHP finds that environment by itself. Requirements: PHP 8.2+ (64-bit) and Python 3.10+. See [Installation](docs/02-installation.md) for every option.
+PyHP finds that environment by itself. Requirements: PHP 8.2+ (64-bit) and Python 3.11+. See [Installation](docs/02-installation.md) for every option.
 
 ## A few examples
 

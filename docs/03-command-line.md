@@ -20,7 +20,7 @@ winget install --id=astral-sh.uv -e                     :: Windows
 curl -LsSf https://astral.sh/uv/install.sh | sh          # Linux / macOS
 ```
 
-**Without uv**, setup uses the Python already installed: the `py` launcher on Windows (`py -3.12`), or `python3.12` / `python3` / `python` elsewhere, then `python -m venv` and `pip`. It needs Python 3.10 or newer; if the requested version isn't installed, it uses another 3.10+ version and says so.
+**Without uv**, setup uses the Python already installed: the `py` launcher on Windows (`py -3.12`), or `python3.12` / `python3` / `python` elsewhere, then `python -m venv` and `pip`. It needs Python 3.11 or newer; if the requested version isn't installed, it uses another 3.11+ version and says so.
 
 Settings, all optional, under `extra.pyhp` in `composer.json`:
 

@@ -41,6 +41,8 @@ from collections.abc import Callable, Iterable, Iterator
 from typing import Final, Protocol, TypeAlias, cast
 
 PROTOCOL_VERSION: Final = 3
+# Oldest Python the worker runs on; older ones stop at start-up with a message.
+MIN_PYTHON: Final = (3, 11)
 # How deep PHP -> Python -> PHP -> ... callbacks may nest.
 MAX_CALLBACK_DEPTH: Final = 32
 # Most characters sent in one live output frame.
@@ -243,7 +245,7 @@ def encode_value(value: object, registry: Registry, *, strict: bool = False) -> 
 def _ensure_recursion_room() -> None:
     """Make room for MAX_DEPTH levels of nesting (a few frames each).
 
-    Python 3.10 and 3.11 allow only 1000 frames by default, which a value
+    Python 3.11 allows only 1000 frames by default, which a value
     nested close to MAX_DEPTH would exceed.
     """
     if sys.getrecursionlimit() < RECURSION_LIMIT:
@@ -1368,7 +1370,20 @@ def _accept_php(server: socket.socket, token: str, deadline: float) -> socket.so
         conn.close()
 
 
+def unsupported_python(version: tuple[int, ...]) -> str | None:
+    """Why this Python can't run the worker, or None when it can."""
+    if tuple(version[:2]) >= MIN_PYTHON:
+        return None
+    wanted = ".".join(map(str, MIN_PYTHON))
+    found = ".".join(map(str, version[:3]))
+    return f"PyHP needs Python {wanted} or newer, but this is Python {found}"
+
+
 def main() -> int:
+    problem = unsupported_python(sys.version_info[:3])
+    if problem is not None:
+        sys.stderr.write(f"pyhp: {problem}\n")
+        return 4
     port_file = os.environ.pop("PYHP_PORT_FILE")
     token = os.environ.pop("PYHP_TOKEN")
     max_frame = int(os.environ.pop("PYHP_MAX_FRAME", str(DEFAULT_MAX_FRAME)))
