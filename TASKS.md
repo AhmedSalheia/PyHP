@@ -7,10 +7,9 @@ Goal: people can build products on PyHP without fearing breaking changes: a revi
 Decisions (2026-11-09): deprecations warn with `E_USER_DEPRECATED` for at least one minor release before removal in a major; end-of-life PHP/Python versions may be dropped in a minor; fixes only for the latest minor. 1.0 comes before `pyhp/laravel`; release candidates first (`1.0.0-rc1`, then `1.0.0`); production use is a soft goal (Ahmed's own projects), not a gate; docs website with VitePress on GitHub Pages; support stays PHP 8.2+ (64-bit) and Python 3.10+.
 
 ### Today: 2026-11-09
-- [r] Compatibility promise: docs/17-compatibility.md (branch: chore/compatibility-docs)
+- [r] Wire protocol documented frame by frame, with a test that keeps it complete (branch: chore/protocol-docs)
 
 ### Backlog (this scope)
-- [ ] Wire protocol: document every frame (the clear error on a version mismatch already exists)
 - [ ] CI matrix: oldest and newest supported PHP and Python on Linux, Windows and macOS
 - [ ] Mutation testing on the core (Infection, mutmut) and coverage towards 90%
 - [ ] Security review of the worker and its socket handling
@@ -20,6 +19,7 @@ Decisions (2026-11-09): deprecations warn with `E_USER_DEPRECATED` for at least 
 - [ ] Release 1.0.0-rc1, then 1.0.0
 
 ### Done (this scope)
+- [x] Compatibility promise: docs/17-compatibility.md (PR #42)
 - [x] `@internal` on everything that isn't public API, the public API list and its guard test (PR #41)
 - [x] Breaking cleanups from the API review: `Py::shared()` name required, `Session::configuration()`, option `auto_restart`, CLI exit code 2 for wrong usage (PR #40)
 - [x] Public API review written and decided: docs/tasks/v1-api-review.md (PR #39)
