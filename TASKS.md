@@ -1,22 +1,21 @@
 # Tasks
 
-## Scope 5: Long-running PHP and frameworks (v0.4.0)
+## Scope 6: Laravel (pyhp/laravel v0.1.0)
 
-Goal: PyHP is comfortable in production setups where PHP processes live for a long time (queue workers, Laravel Octane, RoadRunner, FrankenPHP). See ROADMAP.md.
+Goal: a separate package, `pyhp/laravel` (repository `pyhp-php/laravel`), that makes PyHP feel native in Laravel, built on 0.4's shared sessions and 0.3's per-package requirements. See ROADMAP.md.
 
-Decisions (2026-11-08): restart is opt-in (`restart` option; the failed call still throws, the next one gets a fresh worker and the `onStart` hooks); session reuse is one shared session per process and name (`Py::shared()`), a pool can come later; `pyhp/laravel` moves to its own release after 0.4.0. Live output: echo mode prints live, capture stays as it is, `onOutput()` sends chunks to a callback. `Py::vectorize()`: chunk closures and `elementwise: true`, used with `->pipe()`, keeps the Series index, default batch 1,000.
-
-### Today: 2026-11-08
-- [r] `Py::vectorize()`: chunk closures and `elementwise: true`, keeps the Series index (branch: feature/vectorize)
+### Today: 2026-11-09
+- [ ] Agree on pyhp/laravel design decisions (config file shape, facade and container bindings, session lifetime under FPM / Octane / queue workers, artisan commands, supported Laravel versions, testing helpers)
 
 ### Backlog (this scope)
-- [ ] Docs, CHANGELOG and release 0.4.0
+- [ ] New repository `pyhp-php/laravel` with CI, hooks and GitFlow branches
+- [ ] Service provider, `config/pyhp.php`, facade
+- [ ] Session lifetime that matches the request, the Octane worker or the queue worker
+- [ ] `php artisan pyhp:setup` and `pyhp:info`
+- [ ] Docs, CHANGELOG and release pyhp/laravel v0.1.0
 
 ### Done (this scope)
-- [x] Live output: echo prints live, `onOutput()` callback (PR #34)
-- [x] Worker recovery and shared sessions (PR #33)
-- [x] Design decisions agreed (2026-11-08)
 
 ### Notes for next session
-- v0.3.0 tasks are archived in docs/tasks/v0.3.0.md.
+- v0.3.0 and v0.4.0 tasks are archived in docs/tasks/.
 - ClickUp sync not set up for PyHP yet; TASKS.md is the source of truth.
