@@ -119,17 +119,35 @@ test('Py::rows needs a DataFrame', function (): void {
         ->toThrow(PythonException::class, 'a pandas DataFrame is needed, not a set');
 })->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
 
-test('Py::rows is much faster than to_dict records for big frames', function (): void {
-    $this->py->exec("import numpy as np, pandas as pd\nbig = pd.DataFrame({'g': np.arange(50_000) % 10, 'v': np.arange(50_000) / 7, 's': ['abc'] * 50_000})");
+test('Py::rows gives exactly what to_dict records gives', function (): void {
+    $this->py->exec("import numpy as np, pandas as pd\nbig = pd.DataFrame({'g': np.arange(5_000) % 10, 'v': np.arange(5_000) / 7, 's': ['abc'] * 5_000})");
     $big = $this->py->vars->big;
 
-    $start = hrtime(true);
-    $viaRecords = $big->to_dict('records');
-    $recordsMs = (hrtime(true) - $start) / 1e6;
-    $start = hrtime(true);
-    $viaRows = Py::rows($big);
-    $rowsMs = (hrtime(true) - $start) / 1e6;
-
-    expect($viaRows)->toBe($viaRecords)
-        ->and($rowsMs)->toBeLessThan($recordsMs);
+    expect(Py::rows($big))->toBe($big->to_dict('records'));
 })->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
+
+test('Py::rows is faster than to_dict records for big frames', function (): void {
+    $this->py->exec("import numpy as np, pandas as pd\nbig = pd.DataFrame({'g': np.arange(50_000) % 10, 'v': np.arange(50_000) / 7, 's': ['abc'] * 50_000})");
+    $big = $this->py->vars->big;
+    $best = static function (Closure $copy): float {
+        $times = [];
+        for ($run = 0; $run < 3; $run++) {
+            $start = hrtime(true);
+            $copy();
+            $times[] = (hrtime(true) - $start) / 1e6;
+        }
+
+        return min($times);
+    };
+
+    $recordsMs = $best(fn () => $big->to_dict('records'));
+    $rowsMs = $best(fn () => Py::rows($big));
+
+    expect($rowsMs)->toBeLessThan($recordsMs);
+    // Xdebug slows every PHP line several times over, and Py::rows() builds its rows in
+    // PHP while to_dict() works in Python and json_decode(): with Xdebug on, the timing
+    // would measure Xdebug, not PyHP. pcov (used in CI) doesn't distort it this way.
+})->skip(
+    fn () => xdebugIsInstrumenting() || ! pythonHasModule('pandas'),
+    'needs pandas, and Xdebug off (it distorts PHP timings)',
+);

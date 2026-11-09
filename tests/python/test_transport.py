@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import socket
 import struct
 import subprocess
@@ -210,6 +211,8 @@ def test_extra_paths_are_added_to_sys_path(tmp_path: Path, monkeypatch: pytest.M
     connection.receive()
     connection.send({"op": "eval", "expr": "__import__('pyhp_extra_module').VALUE"})
     assert connection.receive()["value"] == 7
+    connection.send({"op": "eval", "expr": "__import__('sys').path[0]"})
+    assert connection.receive()["value"] == str(library)  # before Python's own paths
     connection.sock.close()
     connection.process.wait(timeout=10)
 
@@ -332,3 +335,16 @@ def test_the_listener_is_loopback_only_and_exclusive() -> None:
 
 def test_unauthenticated_clients_wait_at_most_two_seconds() -> None:
     assert AUTH_TIMEOUT == 2.0
+
+
+def test_hello_reports_the_python_version(worker: Connection) -> None:
+    assert worker.receive()["python"] == platform.python_version()
+
+
+def test_writes_to_file_descriptor_1_go_to_the_log(worker: Connection) -> None:
+    worker.receive()
+    worker.send({"op": "exec", "code": "import os\nos.write(1, b'written-to-fd-1\\n')"})
+    assert worker.receive()["ok"] is True
+    worker.sock.close()
+    worker.process.wait(timeout=10)
+    assert "written-to-fd-1" in worker.log.read_text()

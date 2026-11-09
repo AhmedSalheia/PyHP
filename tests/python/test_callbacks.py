@@ -303,7 +303,7 @@ def test_the_pyhp_module_exposes_only_its_public_api() -> None:
                 "    except pyhp.PhpError as e:\n"
                 "        names = [n for n in vars(e) if not n.startswith('_')]\n"
                 "    module = sorted(n for n in vars(pyhp) if not n.startswith('_'))\n"
-                "    callback = [n for n in dir(f) if not n.startswith('_')]\n"
+                "    callback = [n for n in type(f).__slots__ if not n.startswith('_')]\n"
                 "    return [sorted(names), module, callback]"
             ),
         }
