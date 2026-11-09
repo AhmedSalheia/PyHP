@@ -73,6 +73,20 @@ macOS runners are free for public repositories. For private ones they use your A
 
 TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level max, `mypy --strict`, Ruff (`E,F,W,I,B,UP,N,S,ANN,SIM,RUF`), and fail-loudly exceptions. The worker stays standard-library-only.
 
+### Mutation testing
+
+Coverage says which lines the tests run; mutation testing says whether they would notice a bug there. The tools change the code one small step at a time (`<` into `<=`, `+ 1` into `+ 2`, a value into `None`) and run the tests against each change, a *mutant*. A mutant the tests catch is *killed*; one they don't catch has *survived* and points at a missing check.
+
+```bash
+composer mutate                  # the PHP library: Pest's built-in mutation testing
+pip install "mutmut<3"           # the Python worker (mutmut 3 can't handle the python/ folder layout)
+mutmut run && mutmut results     # then `mutmut show <id>` for a survivor's change
+```
+
+Both are slow (tens of minutes), so CI runs them in a separate workflow, `.github/workflows/mutation.yml`: start it from the Actions tab, and it also runs every Monday. The report is in the run's summary and artifacts.
+
+Some survivors can't be killed and are fine to leave: changes that keep the same behaviour (reference ids counting up by 2 instead of 1, a performance cache turned off, type hints), Windows-only code when running on Linux, and the exact wording of a few internal error messages.
+
 ### The public API list
 
 `tests/php/public-api.txt` lists PyHP's public API: every public class, constant, property and method in `src/` that isn't marked `@internal`, with parameter names (named arguments make them part of the API), types and defaults. `tests/php/PublicApiTest.php` fails whenever the code and the list differ, so nothing enters or leaves the public API by accident.

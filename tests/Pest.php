@@ -144,3 +144,15 @@ function installPackages(string $root, array $packages, string $vendor = 'vendor
         json_encode(['packages' => $entries, 'dev' => true, 'dev-package-names' => []], JSON_THROW_ON_ERROR),
     );
 }
+
+/** True when Xdebug is loaded and doing anything (coverage, debugging, ...), which slows PHP code down. */
+function xdebugIsInstrumenting(): bool
+{
+    if (! extension_loaded('xdebug')) {
+        return false;
+    }
+    $mode = getenv('XDEBUG_MODE');
+    $mode = is_string($mode) && $mode !== '' ? $mode : (string) ini_get('xdebug.mode');
+
+    return $mode !== 'off' && $mode !== '';
+}

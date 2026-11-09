@@ -9,6 +9,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ## [@dev]
 
 ### Added
+- Mutation testing: `composer mutate` (Pest's built-in `--mutate`) for the PHP library and `mutmut` for the Python worker, configured in `composer.json` and `pyproject.toml`, and a `Mutation testing` workflow that runs both every Monday or on demand. A first run on the worker killed 74% of the mutants; 73 new tests for exact limits (64-bit integers, nesting depth, frame and authentication sizes, output chunks), callback counters and error messages raise that to 86% (869 of 1,012; most of the rest change behaviour in no observable way, or only an error message's wording). See [Development](docs/16-development.md#mutation-testing).
 - The wire protocol is documented frame by frame in [How PyHP works inside](docs/15-internals.md#the-wire-protocol-frame-by-frame): start-up, the handshake, every operation with its fields and result, error kinds, callback and output frames, value tags and the version history. A test fails when the worker gains an operation or value tag the reference doesn't describe.
 - [Versions and compatibility](docs/17-compatibility.md): what the 1.0 promise covers (public API, options, CLI and exit codes, `extra.pyhp` keys, the Python `pyhp` module) and what it doesn't; deprecations warn with `E_USER_DEPRECATED` for at least one minor release before removal in a major; end-of-life PHP and Python versions can be dropped in a minor release; fixes go into the latest minor release.
 - `tests/php/public-api.txt` and `PublicApiTest`: the public API is listed (classes, constants, properties, methods with parameter names, types and defaults), and the tests fail when it changes without the list being updated. See [Development](docs/16-development.md#the-public-api-list).
@@ -26,6 +27,9 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - **Breaking:** the `restart` option is now `auto_restart` (`autoRestart` as a `Config` argument and property), so it isn't confused with `Session::restart()`. The old key throws `ConfigException` saying what it was renamed to. *Upgrade:* `['restart' => true]` becomes `['auto_restart' => true]`.
 - **Breaking:** `vendor/bin/pyhp` exits with 2 on wrong usage (unknown command or option, missing or invalid option value) instead of 1, so scripts can tell a typo from a failure. Failures still exit with 1. *Upgrade:* only scripts that check for exactly 1 after a usage error are affected.
 - Roadmap: 1.0.0 (a reviewed, frozen API with release candidates first) now comes before `pyhp/laravel`, so the Laravel package builds on a stable API.
+
+### Fixed
+- The `Py::rows()` speed test no longer fails under Xdebug: it's now separate from the correctness check, takes the best of three runs, and is skipped while Xdebug instruments PHP (which slows PHP code several times and made it measure Xdebug instead of PyHP).
 
 ## [0.4.0] - 2026-11-09
 
