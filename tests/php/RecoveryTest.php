@@ -25,15 +25,15 @@ afterEach(function (): void {
     Py::closeShared();
 });
 
-test('without the restart option a crashed session stays dead', function (): void {
+test('without the auto_restart option a crashed session stays dead', function (): void {
     $py = testSession();
     crash($py);
 
     expect(fn () => $py->eval('1'))->toThrow(SessionClosedException::class);
 });
 
-test('with restart, the call that crashes still fails but the next one gets a fresh worker', function (): void {
-    $py = testSession(['restart' => true]);
+test('with auto_restart, the call that crashes still fails but the next one gets a fresh worker', function (): void {
+    $py = testSession(['auto_restart' => true]);
     $py->vars->kept = 'gone after the crash';
     $firstPid = $py->info()['pid'];
     crash($py);
@@ -45,7 +45,7 @@ test('with restart, the call that crashes still fails but the next one gets a fr
 });
 
 test('onStart hooks run immediately and again after every restart', function (): void {
-    $py = testSession(['restart' => true]);
+    $py = testSession(['auto_restart' => true]);
     $starts = new ArrayObject;
     $py->onStart(function (Session $session) use ($starts): void {
         $starts->append(true);
@@ -61,8 +61,8 @@ test('onStart hooks run immediately and again after every restart', function ():
     $py->close();
 });
 
-test('a timed-out call kills the worker; with restart the session carries on', function (): void {
-    $py = testSession(['restart' => true, 'timeout' => 0.5]);
+test('a timed-out call kills the worker; with auto_restart the session carries on', function (): void {
+    $py = testSession(['auto_restart' => true, 'timeout' => 0.5]);
 
     expect(fn () => $py->exec('import time; time.sleep(5)'))->toThrow(TimeoutException::class);
     expect($py->eval('"alive"'))->toBe('alive');
@@ -70,7 +70,7 @@ test('a timed-out call kills the worker; with restart the session carries on', f
 });
 
 test('proxies from before a restart are refused instead of hitting other objects', function (): void {
-    $py = testSession(['restart' => true]);
+    $py = testSession(['auto_restart' => true]);
     $old = $py->eval('[1, 2, 3].__iter__()');
     crash($py);
     $new = $py->eval('{"fresh"}');
@@ -100,14 +100,14 @@ test('restart() resets the session on demand and runs the hooks', function (): v
 });
 
 test('an explicitly closed session is never restarted', function (): void {
-    $py = testSession(['restart' => true]);
+    $py = testSession(['auto_restart' => true]);
     $py->close();
 
     expect(fn () => $py->eval('1'))->toThrow(SessionClosedException::class);
 });
 
 test('ping() tells whether the worker answers', function (): void {
-    $py = testSession(['restart' => true]);
+    $py = testSession(['auto_restart' => true]);
 
     expect($py->ping())->toBeTrue();
     crash($py);
@@ -128,6 +128,13 @@ test('restarting from inside a PHP callback is refused', function (): void {
     $py->close();
 });
 
+test('Py::shared needs a name, so it is never confused with Py::default()', function (): void {
+    $parameter = (new ReflectionMethod(Py::class, 'shared'))->getParameters()[0];
+
+    expect($parameter->getName())->toBe('name')
+        ->and($parameter->isOptional())->toBeFalse();
+});
+
 test('Py::shared returns one long-lived, self-healing session per name', function (): void {
     Py::config(['python' => testPython(), 'output' => 'capture']);
     $setups = new ArrayObject;
@@ -139,10 +146,13 @@ test('Py::shared returns one long-lived, self-healing session per name', functio
     $a = Py::shared('reports', $setup);
     $again = Py::shared('reports', $setup);
     $other = Py::shared('other');
+    $plain = Py::default();
     crash($a);
 
     expect($again)->toBe($a)
         ->and($other)->not->toBe($a)
+        ->and($plain->configuration()->autoRestart)->toBeFalse()
+        ->and($a->configuration()->autoRestart)->toBeTrue()
         ->and($a->eval('statistics.mean([1, 2, 3])'))->toBe(2)
         ->and(count($setups))->toBe(2);
 

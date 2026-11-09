@@ -9,6 +9,10 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ## [@dev]
 
 ### Changed
+- **Breaking:** `Py::shared()` needs a name: `Py::shared('reports', ...)`. Without one it gave a session called "default" that wasn't `Py::default()`. *Upgrade:* pass the name you want; `Py::shared('default')` behaves as before.
+- **Breaking:** `Session::config()` is now `Session::configuration()`, matching `Py::configuration()` (`Py::config()` changes the configuration, it doesn't read it). *Upgrade:* rename the call.
+- **Breaking:** the `restart` option is now `auto_restart` (`autoRestart` as a `Config` argument and property), so it isn't confused with `Session::restart()`. The old key throws `ConfigException` saying what it was renamed to. *Upgrade:* `['restart' => true]` becomes `['auto_restart' => true]`.
+- **Breaking:** `vendor/bin/pyhp` exits with 2 on wrong usage (unknown command or option, missing or invalid option value) instead of 1, so scripts can tell a typo from a failure. Failures still exit with 1. *Upgrade:* only scripts that check for exactly 1 after a usage error are affected.
 - Roadmap: 1.0.0 (a reviewed, frozen API with release candidates first) now comes before `pyhp/laravel`, so the Laravel package builds on a stable API.
 
 ## [0.4.0] - 2026-11-09

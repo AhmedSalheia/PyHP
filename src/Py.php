@@ -76,10 +76,11 @@ final class Py
 
     /**
      * One long-lived session per name for this PHP process, for queue workers and
-     * app servers: created on first use with the "restart" option on, so it
+     * app servers: created on first use with the "auto_restart" option on, so it
      * survives crashes and timeouts, and $setup runs as its onStart hook (now and
      * after every restart). Later calls return the same session; their $setup
-     * and $overrides are ignored.
+     * and $overrides are ignored. The name is required, so a shared session is
+     * never mistaken for default(), which doesn't restart by itself.
      *
      * Under PHP-FPM a process serves one request at a time and PHP forgets static
      * state between requests, so there a shared session lives for one request.
@@ -87,10 +88,10 @@ final class Py
      * @param  (Closure(Session): mixed)|null  $setup  imports and models the session needs
      * @param  array<string, mixed>  $overrides  options for this session only
      */
-    public static function shared(string $name = 'default', ?Closure $setup = null, array $overrides = []): Session
+    public static function shared(string $name, ?Closure $setup = null, array $overrides = []): Session
     {
         if (! isset(self::$shared[$name])) {
-            $session = self::session(['restart' => true] + $overrides);
+            $session = self::session(['auto_restart' => true] + $overrides);
             if ($setup !== null) {
                 $session->onStart($setup);
             }

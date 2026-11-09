@@ -56,7 +56,7 @@ test('Py::session creates independent sessions with overrides', function (): voi
 
     expect($a)->toBeInstanceOf(Session::class)
         ->and(isset($b->vars->x))->toBeFalse()
-        ->and($b->config()->timeout)->toBe(3.0);
+        ->and($b->configuration()->timeout)->toBe(3.0);
     $a->close();
     $b->close();
 });
@@ -71,7 +71,7 @@ test('config changes apply to sessions created afterwards', function (): void {
     Py::reset();
 
     expect(Py::default())->not->toBe($first)
-        ->and(Py::default()->config()->timeout)->toBe(7.0);
+        ->and(Py::default()->configuration()->timeout)->toBe(7.0);
 });
 
 test('a closed default session is replaced automatically', function (): void {
