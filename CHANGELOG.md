@@ -9,6 +9,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ## [@dev]
 
 ### Added
+- [Versions and compatibility](docs/17-compatibility.md): what the 1.0 promise covers (public API, options, CLI and exit codes, `extra.pyhp` keys, the Python `pyhp` module) and what it doesn't; deprecations warn with `E_USER_DEPRECATED` for at least one minor release before removal in a major; end-of-life PHP and Python versions can be dropped in a minor release; fixes go into the latest minor release.
 - `tests/php/public-api.txt` and `PublicApiTest`: the public API is listed (classes, constants, properties, methods with parameter names, types and defaults), and the tests fail when it changes without the list being updated. See [Development](docs/16-development.md#the-public-api-list).
 
 ### Changed

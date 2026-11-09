@@ -18,5 +18,6 @@ Read the files in order; each one builds on the previous ones.
 14. [Limitations](14-limitations.md)
 15. [How PyHP works inside](15-internals.md)
 16. [Development](16-development.md)
+17. [Versions and compatibility](17-compatibility.md)
 
 The plan for the next versions is in [`ROADMAP.md`](../ROADMAP.md).
