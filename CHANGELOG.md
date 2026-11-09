@@ -8,6 +8,21 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+## [0.4.0] - 2026-11-09
+
+### Added
+- Worker recovery: the `restart` option starts a fresh worker on the next call after a crash or timeout (the failed call still throws); `Session::onStart()` registers hooks that rebuild the session's state now and after every restart; `Session::restart()` resets a session on purpose; `Session::ping()` is a cheap health check.
+- `Py::shared($name, $setup)`: one long-lived, self-healing session per name for queue workers and app servers, and `Py::closeShared()`.
+- `StaleProxyException`: proxies from before a restart are refused, instead of reaching unrelated objects in the new worker; their releases are dropped so they can't free objects in it.
+- Live output: what Python prints reaches PHP while a call runs, about a line at a time. `Session::onOutput()` sends it to a callback (progress bars, logs) instead of echoing or capturing it.
+- `Py::vectorize()`: a PHP closure that Python calls once per batch of values (1,000 by default) instead of once per value, about 60 times faster than `apply()` on a Series; `elementwise: true` wraps a per-value closure. Used with `->pipe()`, a pandas Series comes back with its index and name.
+
+### Changed
+- Echo mode (the default) prints Python's output live while the call runs instead of all at once when it ends. Wire protocol version 3.
+
+### Fixed
+- `pyhp lock` and `pyhp setup` no longer try to delete temporary or half-written files that don't exist (it raised a PHP warning on Windows when a resolution failed).
+
 ## [0.3.0] - 2026-11-08
 
 ### Added
@@ -82,7 +97,8 @@ First public release.
 - CI on Linux, Windows and macOS with PHP 8.2 / 8.4 and Python 3.10 / 3.13: Pest (80% coverage gate), PHPStan max, Pint, pytest, mypy --strict, ruff.
 - SymPy and spaCy suites on Linux; pandas and NumPy on all three systems.
 
-[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.3.0...develop
+[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.4.0...develop
+[0.4.0]: https://github.com/pyhp-php/pyhp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pyhp-php/pyhp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/pyhp-php/pyhp/compare/v0.1.0...v0.1.1

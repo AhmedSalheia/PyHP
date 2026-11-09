@@ -102,7 +102,7 @@ test('info reports the interpreter', function (): void {
     $py = testSession();
     $info = $py->info();
 
-    expect($info['protocol'])->toBe(2)
+    expect($info['protocol'])->toBe(3)
         ->and($info['python'])->toMatch('/^3\.\d+/')
         ->and($info['objects'])->toBe(0);
     $py->close();

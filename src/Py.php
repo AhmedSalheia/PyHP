@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace PyHP;
 
+use Closure;
 use PyHP\Exception\ProtocolException;
 use PyHP\Internal\Codec;
 use PyHP\Value\Dict;
 use PyHP\Value\Slice;
 use PyHP\Value\Tuple;
+use PyHP\Value\Vectorized;
 
 /**
  * Static entry point.
@@ -32,6 +34,9 @@ final class Py
     private static ?Config $config = null;
 
     private static ?Session $default = null;
+
+    /** @var array<string, Session> */
+    private static array $shared = [];
 
     /**
      * Change the configuration used by sessions created from now on, including
@@ -67,6 +72,43 @@ final class Py
         }
 
         return self::$default;
+    }
+
+    /**
+     * One long-lived session per name for this PHP process, for queue workers and
+     * app servers: created on first use with the "restart" option on, so it
+     * survives crashes and timeouts, and $setup runs as its onStart hook (now and
+     * after every restart). Later calls return the same session; their $setup
+     * and $overrides are ignored.
+     *
+     * Under PHP-FPM a process serves one request at a time and PHP forgets static
+     * state between requests, so there a shared session lives for one request.
+     *
+     * @param  (Closure(Session): mixed)|null  $setup  imports and models the session needs
+     * @param  array<string, mixed>  $overrides  options for this session only
+     */
+    public static function shared(string $name = 'default', ?Closure $setup = null, array $overrides = []): Session
+    {
+        if (! isset(self::$shared[$name])) {
+            $session = self::session(['restart' => true] + $overrides);
+            if ($setup !== null) {
+                $session->onStart($setup);
+            }
+            self::$shared[$name] = $session;
+        }
+
+        return self::$shared[$name];
+    }
+
+    /** Close and forget one shared session, or all of them when $name is null. */
+    public static function closeShared(?string $name = null): void
+    {
+        foreach ($name === null ? array_keys(self::$shared) : [$name] as $key) {
+            if (isset(self::$shared[$key])) {
+                self::$shared[$key]->close();
+                unset(self::$shared[$key]);
+            }
+        }
     }
 
     /** Close the default session. With $forgetConfig, also go back to the default configuration. */
@@ -117,6 +159,20 @@ final class Py
     public static function functions(): Functions
     {
         return self::default()->functions;
+    }
+
+    /**
+     * A PHP closure that Python applies in chunks: one round trip per chunk of
+     * $batchSize values instead of one per value. Without $elementwise the closure
+     * receives a chunk (a list) and returns one value per item; with it, it receives
+     * single values, like array_map(). Use it wherever Python calls a function with
+     * the whole data, e.g. $series->pipe(Py::vectorize(ucfirst(...), elementwise: true)).
+     * A pandas Series comes back with its index and name, a NumPy array as an array,
+     * anything else iterable as a list.
+     */
+    public static function vectorize(Closure $callback, bool $elementwise = false, int $batchSize = 1000): Vectorized
+    {
+        return new Vectorized($callback, $elementwise, $batchSize);
     }
 
     /** A Python tuple, e.g. for $df->loc[Py::tuple($rows, 'col')] or $array[Py::tuple(0, 1)]. */

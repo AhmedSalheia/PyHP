@@ -7,11 +7,13 @@ namespace PyHP\Internal;
 use Closure;
 use PyHP\Exception\ConversionException;
 use PyHP\Exception\ProtocolException;
+use PyHP\Exception\StaleProxyException;
 use PyHP\PyObject;
 use PyHP\Session;
 use PyHP\Value\Dict;
 use PyHP\Value\Slice;
 use PyHP\Value\Tuple;
+use PyHP\Value\Vectorized;
 use stdClass;
 
 /**
@@ -32,7 +34,7 @@ final class Codec
     private const JSON_ENCODE_FLAGS = JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE
         | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_INVALID_UTF8_SUBSTITUTE;
 
-    /** @var (Closure(PyObject): array{0: Session, 1: int})|null */
+    /** @var (Closure(PyObject): array{0: Session, 1: int, 2: int})|null */
     private static ?Closure $unwrap = null;
 
     public function __construct(private readonly Session $session) {}
@@ -106,6 +108,11 @@ final class Codec
             $value instanceof Slice => ['$t' => 'slice', 'v' => [$value->start, $value->stop, $value->step]],
             $value instanceof Dict => $this->encodeDict($value->items, $depth),
             $value instanceof Closure => ['$t' => 'callback', 'id' => $this->session->callbackId($value)],
+            $value instanceof Vectorized => [
+                '$t' => 'vectorize',
+                'fn' => ['$t' => 'callback', 'id' => $this->session->callbackId($value->callback)],
+                'batch' => $value->batchSize,
+            ],
             default => throw new ConversionException(sprintf(
                 'A PHP %s cannot be sent to Python. Send scalars, arrays, Python object proxies, '
                 .'or Py::tuple()/Py::slice()/Py::dict() values.',
@@ -180,12 +187,16 @@ final class Codec
         // Read the proxy's private fields without giving PyObject any public
         // method that could hide a Python attribute of the same name.
         self::$unwrap ??= Closure::bind(
-            static fn (PyObject $proxy): array => [$proxy->session, $proxy->id],
+            static fn (PyObject $proxy): array => [$proxy->session, $proxy->id, $proxy->generation],
             null,
             PyObject::class,
         );
+        [$session, $id, $generation] = (self::$unwrap)($object);
+        if ($generation !== $session->generation()) {
+            throw StaleProxyException::restarted();
+        }
 
-        return (self::$unwrap)($object);
+        return [$session, $id];
     }
 
     /**

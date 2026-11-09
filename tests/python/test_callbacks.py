@@ -271,7 +271,7 @@ def test_ping_counts_live_callbacks() -> None:
     value = ok_value(session.handle({"op": "ping"}))
     assert isinstance(value, dict)
     assert value["callbacks"] == 1
-    assert value["protocol"] == 2
+    assert value["protocol"] == 3
 
 
 def test_a_returned_proxy_survives_its_own_release_in_the_same_reply() -> None:

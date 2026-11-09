@@ -134,7 +134,7 @@ final class Installer
             $installed = $this->step($install, $root, $dryRun);
         } finally {
             if ($overrideFile !== null) {
-                @unlink($overrideFile);
+                self::remove($overrideFile);
             }
         }
         if (! $installed) {
@@ -169,7 +169,7 @@ final class Installer
             return $this->resolve($temporary, $config, $root, $requirements, [$python], $uv, $dryRun)
                 && $this->sync($temporary, $root, $python, $uv, $dryRun);
         } finally {
-            @unlink($temporary);
+            self::remove($temporary);
         }
     }
 
@@ -195,15 +195,15 @@ final class Installer
             file_put_contents($input, self::inputLines($requirements->installArguments()));
             try {
                 if (! $this->step($command, $root, $dryRun)) {
-                    @unlink($targetPath);
+                    self::remove($targetPath);
                     $this->explainFailure($requirements);
 
                     return false;
                 }
             } finally {
-                @unlink($input);
+                self::remove($input);
                 if ($overrideFile !== null) {
-                    @unlink($overrideFile);
+                    self::remove($overrideFile);
                 }
             }
             if (! $dryRun) {
@@ -233,7 +233,7 @@ final class Installer
                     .'install uv to get one lock for every operating system.');
             }
         } finally {
-            @unlink($report);
+            self::remove($report);
         }
 
         return true;
@@ -282,6 +282,14 @@ final class Installer
         }
 
         return implode("\n", $lines)."\n";
+    }
+
+    /** Deletes a temporary or half-written file if it exists, without a warning when it doesn't. */
+    private static function remove(string $file): void
+    {
+        if (is_file($file)) {
+            unlink($file);
+        }
     }
 
     private static function isAbsolute(string $path): bool
