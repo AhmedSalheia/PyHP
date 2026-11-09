@@ -7,17 +7,17 @@ Goal: people can build products on PyHP without fearing breaking changes: a revi
 Decisions (2026-11-09): deprecations warn with `E_USER_DEPRECATED` for at least one minor release before removal in a major; end-of-life PHP/Python versions may be dropped in a minor; fixes only for the latest minor. 1.0 comes before `pyhp/laravel`; release candidates first (`1.0.0-rc1`, then `1.0.0`); production use is a soft goal (Ahmed's own projects), not a gate; docs website with VitePress on GitHub Pages; support is PHP 8.2+ (64-bit) and Python 3.11+ (3.10 is end-of-life; dropped before 1.0). CI: newest PHP 8.5 required, 8.6 as a non-blocking job until it's final (19 Nov 2026).
 
 ### Today: 2026-11-09
-- [r] CI matrix: oldest and newest PHP and Python on all three systems, PHP 8.6 early-warning job; Python 3.11 minimum (branch: chore/ci-matrix)
+- [r] Security review of the worker and its socket: docs/tasks/v1-security-review.md; working directory off sys.path, exclusive port on Windows, 2 s auth timeout, docs (branch: fix/security-review)
 
 ### Backlog (this scope)
 - [ ] Mutation testing on the core (Infection, mutmut) and coverage towards 90%
-- [ ] Security review of the worker and its socket handling
 - [ ] Docs website: VitePress from docs/, GitHub Pages deploy in CI, search, upgrade guide, benchmarks page
 - [ ] Triage the ROADMAP parking lot: what (if anything) belongs in 1.0
 - [ ] Use PyHP in a real project of Ahmed's and fold in the feedback (soft goal)
 - [ ] Release 1.0.0-rc1, then 1.0.0
 
 ### Done (this scope)
+- [x] CI matrix: oldest and newest PHP and Python on all three systems, PHP 8.6 early-warning job; Python 3.11 minimum (PR #44)
 - [x] Wire protocol documented frame by frame, with a test that keeps it complete (PR #43)
 - [x] Compatibility promise: docs/17-compatibility.md (PR #42)
 - [x] `@internal` on everything that isn't public API, the public API list and its guard test (PR #41)

@@ -43,6 +43,8 @@ from typing import Final, Protocol, TypeAlias, cast
 PROTOCOL_VERSION: Final = 3
 # Oldest Python the worker runs on; older ones stop at start-up with a message.
 MIN_PYTHON: Final = (3, 11)
+# The worker's own folder, kept off sys.path.
+_SCRIPT_DIR: Final = os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
 # How deep PHP -> Python -> PHP -> ... callbacks may nest.
 MAX_CALLBACK_DEPTH: Final = 32
 # Most characters sent in one live output frame.
@@ -57,7 +59,8 @@ RECURSION_LIMIT: Final = MAX_DEPTH * 4 + 1000
 DEFAULT_MAX_FRAME: Final = 64 * 1024 * 1024
 NAMESPACE_MODULE: Final = "__pyhp__"
 HEADER: Final = struct.Struct(">I")
-AUTH_TIMEOUT: Final = 5.0
+# How long a new connection may take to authenticate before it's dropped.
+AUTH_TIMEOUT: Final = 2.0
 MAX_AUTH_FRAME: Final = 4096
 
 # PHP converts string keys that look like canonical decimal integers into int keys.
@@ -1379,6 +1382,21 @@ def unsupported_python(version: tuple[int, ...]) -> str | None:
     return f"PyHP needs Python {wanted} or newer, but this is Python {found}"
 
 
+def listen() -> socket.socket:
+    """A listening socket on a random loopback port that no other process can share."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:  # Windows: stop other processes binding the same port
+            server.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+    except OSError:
+        server.close()
+        raise
+    return server
+
+
 def main() -> int:
     problem = unsupported_python(sys.version_info[:3])
     if problem is not None:
@@ -1389,16 +1407,17 @@ def main() -> int:
     max_frame = int(os.environ.pop("PYHP_MAX_FRAME", str(DEFAULT_MAX_FRAME)))
     startup_timeout = float(os.environ.pop("PYHP_STARTUP_TIMEOUT", "10"))
     extra_paths = os.environ.pop("PYHP_PATHS", "")
-    # Like `python -c`: the working directory comes first on sys.path,
-    # instead of the directory that contains this worker script.
-    sys.path[0] = os.getcwd()
+    # Neither the working directory nor this script's folder is importable: a file
+    # someone could drop there (random.py, json.py, ...) must never shadow a module.
+    # Only Python's own paths and the "paths" option are.
+    sys.path[:] = [p for p in sys.path if p and os.path.realpath(p) != _SCRIPT_DIR]
     for path in reversed([p for p in extra_paths.split(os.pathsep) if p]):
-        sys.path.insert(1, path)
+        sys.path.insert(0, path)
     _isolate_stdio()
 
     # The worker listens and PHP connects, not the other way round: on Windows,
     # PHP waits 500 ms whenever it closes a listening socket.
-    with socket.create_server(("127.0.0.1", 0)) as server:
+    with listen() as server:
         port = server.getsockname()[1]
         # The trailing newline tells PHP the number is complete.
         with open(port_file, "w", encoding="ascii") as handle:
