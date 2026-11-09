@@ -7,13 +7,13 @@ Goal: people can build products on PyHP without fearing breaking changes: a revi
 Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; release candidates first (`1.0.0-rc1`, then `1.0.0`); production use is a soft goal (Ahmed's own projects), not a gate; docs website with VitePress on GitHub Pages; support stays PHP 8.2+ (64-bit) and Python 3.10+.
 
 ### Today: 2026-11-09
-- [ ] Public API review: inventory every public class, method, option, exception, CLI command and `extra.pyhp` key; propose keep / rename / `@internal` for each (written to docs/tasks/v1-api-review.md for Ahmed to decide)
+- [r] Public API review written and decided: docs/tasks/v1-api-review.md (branch: chore/v1-api-review)
 
 ### Backlog (this scope)
-- [ ] Breaking cleanups agreed in the API review, each with a CHANGELOG upgrade note
-- [ ] `@internal` on everything that isn't public API; PHPStan/tests make sure the public surface matches the list
+- [ ] Breaking cleanups from the API review: `Py::shared()` name required, `Session::configuration()`, option `auto_restart`, CLI exit code 2 for wrong usage (each with a CHANGELOG upgrade note)
+- [ ] `@internal` on everything that isn't public API (Setup, Console, `Config::locatePython()`, ...) and a test that guards the public API list
 - [ ] Compatibility promise: docs page on what is public, SemVer and the deprecation rule
-- [ ] Wire protocol: document every frame; clear error on a version mismatch
+- [ ] Wire protocol: document every frame (the clear error on a version mismatch already exists)
 - [ ] CI matrix: oldest and newest supported PHP and Python on Linux, Windows and macOS
 - [ ] Mutation testing on the core (Infection, mutmut) and coverage towards 90%
 - [ ] Security review of the worker and its socket handling
