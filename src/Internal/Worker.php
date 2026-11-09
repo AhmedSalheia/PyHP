@@ -344,7 +344,7 @@ final class Worker
 
         if (! is_resource($process)) {
             throw new WorkerStartException(sprintf(
-                'Could not start Python using "%s"%s. Set the "python" option to the full path of a Python 3.10+ interpreter.',
+                'Could not start Python using "%s"%s. Set the "python" option to the full path of a Python 3.11+ interpreter.',
                 $config->python,
                 $launchErrors->count() === 0 ? '' : ': '.implode('; ', $launchErrors->getArrayCopy()),
             ));

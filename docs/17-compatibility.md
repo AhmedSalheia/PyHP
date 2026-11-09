@@ -52,7 +52,7 @@ It's removed in the next major release at the earliest. Upgrading is easiest whe
 
 ## Supported PHP and Python versions
 
-PyHP 1.x needs **64-bit PHP 8.2 or newer** and **Python 3.10 or newer**, on Linux, Windows and macOS. CI tests the oldest and the newest supported version of each on all three systems.
+PyHP 1.x needs **64-bit PHP 8.2 or newer** and **Python 3.11 or newer**, on Linux, Windows and macOS. CI tests the oldest and the newest supported version of each on all three systems.
 
 * A PHP or Python version that has reached its **end of life upstream** may be dropped in a **minor** release, announced in the CHANGELOG. Composer then simply keeps you on the last PyHP release that supports your PHP.
 * A version that is still supported upstream is only dropped in a **major** release.

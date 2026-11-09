@@ -147,17 +147,17 @@ test('a different version is used, with a warning, when the requested one is mis
         ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('3.11');
 });
 
-test('Python older than 3.10 is refused', function (): void {
+test('Python older than 3.11 is refused', function (): void {
     $runner = new FakeCommandRunner(
         programs: ['python3' => '/usr/bin/python3'],
-        captures: [probe('/usr/bin/python3') => '3.9'],
+        captures: [probe('/usr/bin/python3') => '3.10'],
     );
 
     $code = (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig, $this->root);
 
     expect($code)->toBe(1)
         ->and($runner->ran)->toBe([])
-        ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('3.10');
+        ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('3.11');
 });
 
 test('with neither uv nor Python it explains how to get one', function (): void {

@@ -9,7 +9,7 @@ That design makes some things easy and some things impossible, and it's worth kn
 | PyHP is | PyHP is not |
 |---|---|
 | A pure Composer package: no PHP extension, no compiling | An embedded interpreter. Python does **not** run inside the PHP process |
-| Any Python 3.10+ you choose: system, venv, conda | A hidden installer. Sessions never install anything; `vendor/bin/pyhp setup` builds the project's environment only when you run it |
+| Any Python 3.11+ you choose: system, venv, conda | A hidden installer. Sessions never install anything; `vendor/bin/pyhp setup` builds the project's environment only when you run it |
 | Crash-isolated: if Python dies, PHP gets an exception and keeps running | Fast at chatty, fine-grained calls (each call is a round trip, ~0.1 ms) |
 | Stateful: imports and variables survive between calls in a session | Shared between web requests (one PHP-FPM request = its own session) |
 | For trusted code you wrote | A sandbox. Never run user-submitted Python with it |

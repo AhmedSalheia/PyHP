@@ -5,7 +5,7 @@
 | | Minimum | Notes |
 |---|---|---|
 | PHP | **8.2**, 64-bit | No extensions beyond the defaults (`json`, `pcre`, `proc_open` allowed). `proc_open` must not be in `disable_functions`. |
-| Python | **3.10** | Anything that runs Python 3.10+: python.org install, `venv`, `conda`, `pyenv`. The worker uses the standard library only. |
+| Python | **3.11** | Anything that runs Python 3.11+: python.org install, `venv`, `conda`, `pyenv`. The worker uses the standard library only. |
 | Your Python libraries | whatever you use | Install them into the interpreter you point PyHP at (`python -m pip install pandas`). |
 
 ## Installation

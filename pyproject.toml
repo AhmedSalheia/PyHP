@@ -2,7 +2,7 @@
 # The worker itself is stdlib-only and is not installed as a package.
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 100
 src = ["python", "tests/python"]
 
@@ -16,13 +16,13 @@ select = ["E", "F", "W", "I", "B", "UP", "N", "S", "ANN", "SIM", "RUF"]
 "python/pyhp_worker.py" = ["S102", "S307"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 files = ["python", "tests/python"]
 mypy_path = "python"
 
 [[tool.mypy.overrides]]
-# Optional test-only dependency; its stubs need a newer Python than our 3.10 target.
+# Optional test-only dependency; its stubs need a newer Python than our 3.11 target.
 module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 follow_imports_for_stubs = true

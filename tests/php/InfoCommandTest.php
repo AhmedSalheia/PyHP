@@ -132,14 +132,14 @@ test('a Python that cannot start is a problem, and the worker is not tried', fun
         ->and($tried->getArrayCopy())->toBe([]);
 });
 
-test('Python older than 3.10 is a problem', function (): void {
+test('Python older than 3.11 is a problem', function (): void {
     $python = ($this->venvPython)();
-    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => probeAnswer('3.9.18')]);
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, []) => probeAnswer('3.10.19')]);
 
     $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root);
 
     expect($code)->toBe(1)
-        ->and(($this->text)())->toContain('needs Python 3.10');
+        ->and(($this->text)())->toContain('needs Python 3.11');
 });
 
 test('a worker that fails to start is a problem with its message', function (): void {

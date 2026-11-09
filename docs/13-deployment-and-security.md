@@ -70,11 +70,11 @@ Shared sessions **share Python state between jobs**: a variable one job sets is 
 
 | Platform | Status |
 |---|---|
-| **Linux** | ✅ Tested in CI: PHP 8.2 and 8.4, Python 3.10 and 3.13, with pandas, NumPy, SymPy and spaCy. |
-| **Windows** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). It uses sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, and passes `SYSTEMROOT` through. |
-| **macOS** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). |
+| **Linux** | ✅ Tested in CI: PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, with pandas, NumPy, SymPy and spaCy. |
+| **Windows** | ✅ Tested in CI (PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, pandas and NumPy). It uses sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, and passes `SYSTEMROOT` through. |
+| **macOS** | ✅ Tested in CI (PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, pandas and NumPy). |
 | **32-bit PHP** | ❌ Not supported (PHP integers must be 64-bit). |
-| **Python < 3.10** | ❌ The worker fails at start-up with a clear `WorkerStartException`. |
+| **Python < 3.11** | ❌ The worker stops at start-up and PHP throws `WorkerStartException` saying which version is needed. |
 
 Process trees: when a worker is killed (timeout, `close()` after the grace period), **child processes your Python code started are not killed**, on any platform.
 
