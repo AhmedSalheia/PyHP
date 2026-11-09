@@ -113,10 +113,10 @@ Decided by Ahmed on 2026-11-09:
 ## Work list
 
 Breaking (each with a CHANGELOG upgrade note):
-- [ ] `Py::shared()`: `$name` required.
-- [ ] `Session::config()` → `configuration()`.
-- [ ] Option `restart` → `auto_restart` / `autoRestart`.
-- [ ] CLI: exit code 2 for wrong usage.
+- [x] `Py::shared()`: `$name` required.
+- [x] `Session::config()` → `configuration()`.
+- [x] Option `restart` → `auto_restart` / `autoRestart`.
+- [x] CLI: exit code 2 for wrong usage.
 
 Non-breaking:
 - [ ] `@internal` on `Config::locatePython()`, `Vectorized::$callback`, every class in `PyHP\Setup` and `PyHP\Console`; fix the misplaced `@internal` on `PyHP\PyObject::__construct`.

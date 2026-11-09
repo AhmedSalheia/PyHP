@@ -103,7 +103,7 @@ final class Session
         $this->close();
     }
 
-    public function config(): Config
+    public function configuration(): Config
     {
         return $this->config;
     }
@@ -196,7 +196,7 @@ final class Session
 
     /**
      * Registers a hook that prepares the session (imports, models, variables): it runs
-     * now, and again whenever the worker is restarted (see the "restart" option).
+     * now, and again whenever the worker is restarted (see the "auto_restart" option).
      *
      * @param  Closure(Session): mixed  $hook
      */
@@ -247,7 +247,7 @@ final class Session
         }
     }
 
-    /** True when the worker answers a ping; restarts it first if the "restart" option allows. */
+    /** True when the worker answers a ping; restarts it first if the "auto_restart" option allows. */
     public function ping(): bool
     {
         try {
@@ -289,7 +289,7 @@ final class Session
      */
     public function request(string $op, array $fields = []): mixed
     {
-        if ($this->config->restart && ! $this->closed && $this->requestDepth === 0
+        if ($this->config->autoRestart && ! $this->closed && $this->requestDepth === 0
             && ($this->worker === null || ! $this->worker->isRunning())) {
             $this->restart();
         }

@@ -7,10 +7,9 @@ Goal: people can build products on PyHP without fearing breaking changes: a revi
 Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; release candidates first (`1.0.0-rc1`, then `1.0.0`); production use is a soft goal (Ahmed's own projects), not a gate; docs website with VitePress on GitHub Pages; support stays PHP 8.2+ (64-bit) and Python 3.10+.
 
 ### Today: 2026-11-09
-- [r] Public API review written and decided: docs/tasks/v1-api-review.md (branch: chore/v1-api-review)
+- [r] Breaking cleanups from the API review: `Py::shared()` name required, `Session::configuration()`, option `auto_restart`, CLI exit code 2 for wrong usage (branch: feature/api-cleanups)
 
 ### Backlog (this scope)
-- [ ] Breaking cleanups from the API review: `Py::shared()` name required, `Session::configuration()`, option `auto_restart`, CLI exit code 2 for wrong usage (each with a CHANGELOG upgrade note)
 - [ ] `@internal` on everything that isn't public API (Setup, Console, `Config::locatePython()`, ...) and a test that guards the public API list
 - [ ] Compatibility promise: docs page on what is public, SemVer and the deprecation rule
 - [ ] Wire protocol: document every frame (the clear error on a version mismatch already exists)
@@ -23,6 +22,7 @@ Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; release candidates firs
 - [ ] Release 1.0.0-rc1, then 1.0.0
 
 ### Done (this scope)
+- [x] Public API review written and decided: docs/tasks/v1-api-review.md (PR #39)
 
 ### Notes for next session
 - v0.3.0 and v0.4.0 tasks are archived in docs/tasks/.

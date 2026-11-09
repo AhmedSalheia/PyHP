@@ -157,6 +157,16 @@ It exits with code 0 when everything looks fine and 1 when it found problems, so
 
 `info` reports what PyHP picks **when your code doesn't choose**. If your application sets the `python` option (`Py::config(['python' => ...])`), that interpreter is used instead. `Config::locatePython()` returns the same answer as `info` from PHP code: the interpreter, the reason (`PythonSource`) and the venv folder.
 
+## Exit codes
+
+Every command exits with:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success (for `info`: everything looks fine). |
+| `1` | The command failed, or `info` found problems. |
+| `2` | Wrong usage: an unknown command or option, or a missing or invalid option value. Nothing was run. |
+
 ---
 
 ← [Installation](02-installation.md) · [Contents](README.md) · [Core concepts](04-core-concepts.md) →

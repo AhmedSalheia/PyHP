@@ -161,7 +161,7 @@ final class PyObject implements ArrayAccess, IteratorAggregate, Stringable
         do {
             $batch = $this->session->request('next_batch', [
                 'ref' => $iterator->id,
-                'size' => $this->session->config()->iterBatchSize,
+                'size' => $this->session->configuration()->iterBatchSize,
             ]);
             if (! is_array($batch) || ! is_array($batch['items'] ?? null)) {
                 throw new ProtocolException('next_batch returned an unexpected value.');
