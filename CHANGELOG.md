@@ -32,6 +32,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - Roadmap: 1.0.0 (a reviewed, frozen API with release candidates first) now comes before `pyhp/laravel`, so the Laravel package builds on a stable API.
 
 ### Fixed
+- The public API guard test passes on PHP 8.5 and newer, whose reflection prints a `self` type as the class's full name: a class's own name is now always written as `self`, so the list reads the same on every PHP version.
 - The `Py::rows()` speed test no longer fails under Xdebug: it's now separate from the correctness check, takes the best of three runs, and is skipped while Xdebug instruments PHP (which slows PHP code several times and made it measure Xdebug instead of PyHP).
 
 ## [0.4.0] - 2026-11-09

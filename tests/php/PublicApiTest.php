@@ -72,19 +72,32 @@ function describeClass(ReflectionClass $class): array
             || in_array($property->getName(), $builtIn, true)) {
             continue;
         }
-        $lines[] = "{$name}::\${$property->getName()}: ".($property->isReadOnly() ? 'readonly ' : '').$property->getType();
+        $lines[] = "{$name}::\${$property->getName()}: ".($property->isReadOnly() ? 'readonly ' : '')
+            .asSelf((string) $property->getType(), $name);
     }
     foreach ($class->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
         if ($method->getDeclaringClass()->getName() !== $name || isInternal($method->getDocComment())
             || in_array($method->getName(), $builtIn, true)) {
             continue;
         }
-        $parameters = array_map(describeParameter(...), $method->getParameters());
+        $parameters = array_map(
+            static fn (ReflectionParameter $parameter): string => asSelf(describeParameter($parameter), $name),
+            $method->getParameters(),
+        );
         $lines[] = "{$name}::".($method->isStatic() ? 'static ' : '')."{$method->getName()}(".implode(', ', $parameters).')'
-            .($method->hasReturnType() ? ": {$method->getReturnType()}" : '');
+            .($method->hasReturnType() ? ': '.asSelf((string) $method->getReturnType(), $name) : '');
     }
 
     return $lines;
+}
+
+/**
+ * Writes a class's own name as `self`. PHP 8.5's reflection prints a `self` type as
+ * the full class name where older versions print `self`; both mean the same API.
+ */
+function asSelf(string $text, string $class): string
+{
+    return (string) preg_replace('/(?<![\\\\\w])'.preg_quote($class, '/').'(?![\\\\\w])/', 'self', $text);
 }
 
 function describeParameter(ReflectionParameter $parameter): string
@@ -124,6 +137,19 @@ test('the public API matches tests/php/public-api.txt', function (): void {
 
     expect(['added' => $added, 'removed' => $removed])->toBe(['added' => [], 'removed' => []]);
 });
+
+test('a class\'s own name is written as self, whatever the PHP version prints', function (string $text, string $expected): void {
+    expect(asSelf($text, 'PyHP\\Config'))->toBe($expected);
+})->with([
+    'self' => ['self', 'self'],
+    'resolved by PHP 8.5' => ['PyHP\\Config', 'self'],
+    'nullable' => ['?PyHP\\Config', '?self'],
+    'in a union' => ['PyHP\\Config|null', 'self|null'],
+    'constant default' => ['float $t = PyHP\\Config::DEFAULT_TIMEOUT', 'float $t = self::DEFAULT_TIMEOUT'],
+    'another class' => ['PyHP\\PyObject', 'PyHP\\PyObject'],
+    'a longer name' => ['PyHP\\ConfigException', 'PyHP\\ConfigException'],
+    'a namespace below it' => ['PyHP\\Config\\Thing', 'PyHP\\Config\\Thing'],
+]);
 
 test('setup and console classes are not public API', function (): void {
     $public = array_filter(publicApi(), static fn (string $line): bool => str_starts_with($line, 'PyHP\\Setup\\')
