@@ -205,7 +205,12 @@ test('the worker check reports how long it took', function (): void {
     $python = edgeVenvPython($this->venv);
     $runner = new FakeCommandRunner(captures: [edgeInfoProbe($python, ['six']) => edgeProbeAnswer()]);
     $slowWorker = function (string $python): ?string {
-        usleep(60_000);
+        // Wait on the clock PyHP measures with: usleep() alone can come back early by
+        // a timer tick (about 15 ms on Windows), and the test would see 47 ms.
+        $until = microtime(true) + 0.06;
+        while (microtime(true) < $until) {
+            usleep(1_000);
+        }
 
         return null;
     };
