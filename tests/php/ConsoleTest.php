@@ -97,6 +97,19 @@ test('the bin/pyhp script runs the application', function (): void {
         ->and(implode("\n", $output))->toContain('pyhp setup');
 });
 
+test('info --json prints one JSON document and other options are wrong usage', function (): void {
+    $app = ($this->app)(new FakeCommandRunner);
+
+    $app->run(['info', '--json'], $this->root);
+    $data = json_decode(implode('', $this->output->getArrayCopy()), true);
+    $wrong = $app->run(['info', '--verbose'], $this->root);
+
+    expect($data)->toBeArray()
+        ->and($data['format'])->toBe(1)
+        ->and($wrong)->toBe(2)
+        ->and(implode('', $this->errors->getArrayCopy()))->toContain('Unknown option "--verbose" for info');
+});
+
 test('info reports a broken composer.json on stderr', function (): void {
     file_put_contents($this->root.'/composer.json', '{');
 

@@ -47,7 +47,12 @@ Decisions (2026-11-09): 1.0 comes before `pyhp/laravel`; the way there is releas
 4. **Verified everywhere it claims to work.** CI on Linux, Windows and macOS for the oldest and newest supported PHP (8.2 and the newest release) and Python (3.11 and the newest release), plus the real-world setup tests.
 5. **Quality bars.** Coverage stays above 80%, aiming for 90%; mutation testing on the core (Infection for PHP, mutmut for Python); PHPStan max, mypy strict; a security review of the worker and its socket handling.
 6. **Documentation website.** VitePress built from `docs/` and published to GitHub Pages by CI, with search, guides for common libraries and long-running PHP, an upgrade guide, and published benchmarks.
-7. **Release candidates.** `1.0.0-rc1` once the API is frozen; only fixes after that; `1.0.0` when an RC has been used in real projects without API changes.
+7. **From the parking lot** (decided 2026-11-09):
+   - `pyhp info --json`, a machine-readable report whose fields are covered by the promise;
+   - Linux on ARM and Windows on ARM in CI (Apple Silicon is already covered);
+   - a ready-made Docker image with PHP, Python, uv and PyHP;
+   - faster transfer of large NumPy arrays (binary frames instead of JSON).
+8. **Release candidates.** `1.0.0-rc1` once the API is frozen; only fixes after that; `1.0.0` when an RC has been used in real projects without API changes.
 
 ## Parking lot
 
@@ -55,8 +60,4 @@ Ideas not scheduled yet:
 
 - Symfony bundle (after `pyhp/laravel` shows what a framework package needs).
 - Callbacks from Python background threads (a thread-safe callback mode).
-- Faster transfer of large NumPy arrays (binary frames instead of JSON), if users need it.
 - conda environments in `pyhp setup`.
-- A ready-made Docker image with PHP, Python, uv and PyHP.
-- `pyhp info --json` for scripts and support tools.
-- Windows on ARM and Linux on ARM in CI.
