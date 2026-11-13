@@ -8,6 +8,9 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+### Fixed
+- A test of `pyhp info`'s worker timing no longer fails on Windows runners, where `usleep()` can return a timer tick early (it measured 47 ms for a 60 ms sleep). Tests only; PyHP itself is unchanged.
+
 ## [1.0.0-rc1] - 2026-11-13
 
 The first release candidate for 1.0: the API is reviewed and frozen, and the [compatibility promise](docs/17-compatibility.md) applies from here on. Install it with `composer require pyhp/pyhp:1.0.0-rc1`; moving from 0.4 is described in [Upgrading](docs/18-upgrading.md).
