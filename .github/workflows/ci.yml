@@ -8,13 +8,15 @@ on:
     branches: [develop, main]
 
 jobs:
-  # The worker on the oldest and newest supported Python.
+  # The worker on the oldest and newest supported Python, on x64 and ARM
+  # (macos-latest is Apple Silicon).
   python-worker:
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-11-arm' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-24.04-arm, windows-11-arm]
         python: ["3.11", "3.15"]
     steps:
       - uses: actions/checkout@v6
@@ -51,6 +53,22 @@ jobs:
             python: "3.11"
           - php: "8.5"
             python: "3.14"
+          # Linux on ARM (Graviton, Ampere, Raspberry Pi 5 class servers).
+          - os: ubuntu-24.04-arm
+            php: "8.2"
+            python: "3.11"
+            experimental: false
+          - os: ubuntu-24.04-arm
+            php: "8.5"
+            python: "3.14"
+            experimental: false
+          # Windows on ARM: PHP has no native ARM64 build for Windows, so it runs as x64
+          # under Windows' emulation next to a native Python, as it does on users'
+          # machines. Non-blocking until it has proven stable.
+          - os: windows-11-arm
+            php: "8.5"
+            python: "3.14"
+            experimental: true
           # Early warning for the next PHP; it can't fail the build until it's final.
           - os: ubuntu-latest
             php: "8.6"
@@ -82,7 +100,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-24.04-arm]
         installer: [uv, pip]
     steps:
       - uses: actions/checkout@v6
