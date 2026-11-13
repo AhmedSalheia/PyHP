@@ -118,6 +118,7 @@ The [`docs/`](docs) folder explains everything, including each limitation. The f
 15. [How PyHP works inside](docs/15-internals.md)
 16. [Development](docs/16-development.md)
 17. [Versions and compatibility](docs/17-compatibility.md)
+18. [Upgrading](docs/18-upgrading.md)
 
 ## Contributing
 

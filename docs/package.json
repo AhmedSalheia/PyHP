@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "The PyHP documentation website (VitePress). The pages are the Markdown files in this folder.",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

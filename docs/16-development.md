@@ -69,11 +69,28 @@ The `setup-smoke` jobs test `pyhp setup` for real on all three systems, once wit
 
 `.github/workflows/docker.yml` builds the [Docker image](13-deployment-and-security.md#docker) from `docker/Dockerfile` when a pull request touches it and runs the `pyhp setup` smoke test inside both variants, with uv and with pip; on `main`, weekly and on demand it publishes the image for amd64 and arm64.
 
+`.github/workflows/docs.yml` builds the [documentation website](#the-documentation-website) on pull requests that touch `docs/`, and publishes it to GitHub Pages from `main`.
+
 macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page).
 
 ### Rules the code follows
 
 TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level max, `mypy --strict`, Ruff (`E,F,W,I,B,UP,N,S,ANN,SIM,RUF`), and fail-loudly exceptions. The worker stays standard-library-only.
+
+### The documentation website
+
+https://pyhp-php.github.io/pyhp/ is built with [VitePress](https://vitepress.dev/) straight from the files in `docs/`, so there is one copy of every page. `docs/.vitepress/config.mts` adapts them for the site: the numbered files become the sidebar in order (a new `NN-name.md` appears by itself, at `/name`), links that leave `docs/` point at GitHub, and the "← · Contents · →" lines at the end of each page are left out because the site has its own. `docs/index.md` is the home page; `docs/README.md` stays the contents page on GitHub and isn't on the site, and neither is `docs/tasks/`.
+
+To work on it, you need Node.js 20 or newer:
+
+```bash
+cd docs
+npm ci
+npm run dev      # http://localhost:5173/pyhp/, reloads as you edit
+npm run build    # what CI runs; fails on dead links
+```
+
+Vue reads the pages as templates, so text like `list<string>` outside backticks breaks the build; put types and code in backticks.
 
 ### Mutation testing
 

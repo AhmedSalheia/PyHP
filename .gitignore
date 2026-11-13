@@ -10,3 +10,7 @@ __pycache__/
 /.venv/
 .mutmut-cache
 html/
+# The documentation website (docs/package.json)
+/docs/node_modules/
+/docs/.vitepress/cache/
+/docs/.vitepress/dist/
