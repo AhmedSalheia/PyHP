@@ -48,6 +48,36 @@ $py->restart();   // start over on purpose, e.g. between jobs that must not shar
 
 Shared sessions **share Python state between jobs**: a variable one job sets is visible to the next. Keep job data in local PHP variables and pass it in, or call `restart()` between jobs that must be isolated.
 
+## Docker
+
+`ghcr.io/pyhp-php/pyhp` is a base image for PHP apps that use PyHP: the official PHP 8.5 image (Debian 13) plus Python 3.13 with `venv` and `pip`, uv and Composer, for `linux/amd64` and `linux/arm64`. PyHP itself isn't in the image; it stays a normal Composer dependency of your app, so the image never pins your PyHP version.
+
+| Tag | For |
+|---|---|
+| `php8.5-cli`, `cli`, `latest` | Scripts, cron jobs, queue workers, long-running servers (Octane, RoadRunner, FrankenPHP workers) |
+| `php8.5-fpm`, `fpm` | Classic web apps: PHP-FPM behind nginx or another web server |
+
+A typical app image:
+
+```dockerfile
+FROM ghcr.io/pyhp-php/pyhp:php8.5-cli
+WORKDIR /app
+
+# Dependencies first, so Docker caches them until composer.json or pyhp.lock change.
+COPY composer.json composer.lock pyhp.lock* ./
+RUN composer install --no-dev --no-interaction --no-scripts \
+    && vendor/bin/pyhp setup
+
+COPY . .
+RUN composer dump-autoload --optimize --no-dev
+CMD ["php", "worker.php"]
+```
+
+* `pyhp setup` creates `/app/.venv`, and sessions find it by themselves. With a `pyhp.lock` it installs exactly the locked versions, so every build gets the same Python packages.
+* uv uses the image's Python 3.13 when it satisfies `extra.pyhp.python`, and downloads the version you asked for otherwise.
+* With the `fpm` variant, PHP runs as `www-data`. The venv is readable by everyone, so that works as it is; if your Python code writes files, give `www-data` a folder it can write to.
+* The image is rebuilt every week to pick up security updates of the PHP and Debian base images. Pull it again (or rebuild with `--pull`) to get them.
+
 ## Security
 
 * **Only run code you trust.** Python code run through PyHP can do anything your PHP process's user can do: read files, open network connections, start processes. A timeout doesn't contain it.
