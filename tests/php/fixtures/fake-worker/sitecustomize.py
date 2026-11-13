@@ -10,6 +10,7 @@ the process act out one failure instead of starting the real worker:
   hello:<json>         answer the handshake with this JSON (the text TOKEN becomes the real token)
   raw:<hex>            answer the handshake with these bytes
   bad-frame            a correct handshake, then announce a frame too large to accept
+  reply:<hex>          a correct handshake, then answer the first request with these bytes
 
 Without PYHP_FAKE_WORKER, it does nothing.
 """
@@ -71,7 +72,9 @@ if MODE:
     if kind == "raw":
         _serve(bytes.fromhex(argument))
         os._exit(0)
-    if kind == "bad-frame":
-        hello = _frame({"op": "hello", "token": TOKEN, "protocol": 3, "python": "3.13.0", "pid": 1})
-        _serve(hello, then=struct.pack(">I", 2**31))
+    if kind in ("bad-frame", "reply"):
+        hello = _frame({"op": "hello", "token": TOKEN, "protocol": 4, "python": "3.13.0", "pid": 1})
+        _serve(
+            hello, then=struct.pack(">I", 2**31) if kind == "bad-frame" else bytes.fromhex(argument)
+        )
         os._exit(0)

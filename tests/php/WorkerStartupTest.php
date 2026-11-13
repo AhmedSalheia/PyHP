@@ -77,7 +77,7 @@ test('a worker that speaks another protocol version is refused with a fix', func
     $error = startFakeWorker('hello:{"op": "hello", "token": "TOKEN", "protocol": 99, "python": "3.13.0", "pid": 1}');
 
     expect($error)->toBeInstanceOf(ProtocolException::class)
-        ->and($error->getMessage())->toBe('The Python worker speaks protocol 99 but this PHP code expects 3. Reinstall PyHP so both halves match.');
+        ->and($error->getMessage())->toBe('The Python worker speaks protocol 99 but this PHP code expects 4. Reinstall PyHP so both halves match.');
 });
 
 test('a handshake that is not PyHP\'s is refused', function (string $mode, string $message): void {
@@ -87,8 +87,8 @@ test('a handshake that is not PyHP\'s is refused', function (string $mode, strin
         ->and($error->getMessage())->toBe($message);
 })->with([
     'unreadable JSON' => ['hello:{nope', 'The PyHP worker sent an unreadable handshake.'],
-    'another token' => ['hello:{"op": "hello", "token": "someone else", "protocol": 3}', 'The process on the PyHP socket is not the worker PyHP started.'],
-    'not a hello' => ['hello:{"op": "ping", "token": "TOKEN", "protocol": 3}', 'The process on the PyHP socket is not the worker PyHP started.'],
+    'another token' => ['hello:{"op": "hello", "token": "someone else", "protocol": 4}', 'The process on the PyHP socket is not the worker PyHP started.'],
+    'not a hello' => ['hello:{"op": "ping", "token": "TOKEN", "protocol": 4}', 'The process on the PyHP socket is not the worker PyHP started.'],
     'empty frame' => ['raw:00000000', 'The process on the PyHP socket is not a PyHP worker.'],
     'frame too big for a hello' => ['raw:00010001', 'The process on the PyHP socket is not a PyHP worker.'],
 ]);
@@ -100,3 +100,31 @@ test('a frame that announces an impossible size stops the worker', function (): 
     expect(fn () => $py->eval('1'))->toThrow(ProtocolException::class, 'The worker announced an invalid message size')
         ->and($py->isOpen())->toBeFalse();
 });
+
+test('broken binary frames from the worker are protocol errors', function (string $reply, string $message): void {
+    $env = ['PYTHONPATH' => __DIR__.DIRECTORY_SEPARATOR.'fixtures'.DIRECTORY_SEPARATOR.'fake-worker', 'PYHP_FAKE_WORKER' => 'reply:'.bin2hex($reply)];
+    $py = new Session(testConfig(['env' => $env]));
+
+    expect(fn () => $py->eval('1'))->toThrow(ProtocolException::class, $message);
+})->with([
+    'negative count' => [fakeFrame(['ok' => true, 'value' => 1, 'out' => '', 'bin' => -1]), 'The worker announced an invalid number of binary frames.'],
+    'count not an int' => [fakeFrame(['ok' => true, 'value' => 1, 'out' => '', 'bin' => '1']), 'The worker announced an invalid number of binary frames.'],
+    'frame too large' => [fakeFrame(['ok' => true, 'value' => 1, 'out' => '', 'bin' => 1]).pack('N', 2 ** 31), 'The worker announced an invalid message size'],
+    'missing buffer' => [fakeFrame(['ok' => true, 'value' => fakeArray('f8', [1], 1), 'out' => '', 'bin' => 1]).pack('N', 8).pack('e', 1.0), 'The worker referred to array buffer #1, which it did not send.'],
+    'broken tag' => [fakeFrame(['ok' => true, 'value' => fakeArray('f8', [-1], 0), 'out' => '', 'bin' => 1]).pack('N', 0), 'Invalid array on the wire.'],
+    'wrong size' => [fakeFrame(['ok' => true, 'value' => fakeArray('f8', [2], 0), 'out' => '', 'bin' => 1]).pack('N', 8).pack('e', 1.0), 'The worker sent 8 bytes for an array of shape [2] and dtype f8, which needs 16.'],
+]);
+
+/** @param array<string, mixed> $message */
+function fakeFrame(array $message): string
+{
+    $body = (string) json_encode($message);
+
+    return pack('N', strlen($body)).$body;
+}
+
+/** @param list<int> $shape @return array<string, mixed> */
+function fakeArray(string $dtype, array $shape, int $buffer): array
+{
+    return ['$t' => 'ndarray', 'dtype' => $dtype, 'shape' => $shape, 'buf' => $buffer];
+}

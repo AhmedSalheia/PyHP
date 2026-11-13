@@ -69,6 +69,7 @@ PyHP\Py::static functions(): PyHP\Functions
 PyHP\Py::static import(string $module, ?string $as = null, ?string $from = null): mixed
 PyHP\Py::static len(PyHP\PyObject $object): int
 PyHP\Py::static modules(): PyHP\Modules
+PyHP\Py::static ndarray(array $data, string $dtype = 'float64'): PyHP\Value\NdArray
 PyHP\Py::static ref(PyHP\PyObject $object, string $attribute): PyHP\PyObject
 PyHP\Py::static repr(PyHP\PyObject $object): string
 PyHP\Py::static reset(bool $forgetConfig = false): void
@@ -123,6 +124,11 @@ PyHP\Session::takeOutput(): string
 PyHP\Value\Dict: final readonly class
 PyHP\Value\Dict::$items: readonly array
 PyHP\Value\Dict::__construct(array $items)
+PyHP\Value\NdArray: final readonly class
+PyHP\Value\NdArray::$data: readonly array
+PyHP\Value\NdArray::$dtype: readonly string
+PyHP\Value\NdArray::DTYPES const
+PyHP\Value\NdArray::__construct(array $data, string $dtype = 'float64')
 PyHP\Value\Slice: final readonly class
 PyHP\Value\Slice::$start: readonly ?int
 PyHP\Value\Slice::$step: readonly ?int
