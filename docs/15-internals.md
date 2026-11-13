@@ -30,7 +30,7 @@ The protocol is versioned (`protocol: 3` since live output; 2 added callbacks). 
 
 ## The wire protocol, frame by frame
 
-Protocol version: **3**. This is a reference for people working on PyHP itself. Both halves ship in the same package, so the protocol isn't part of the [compatibility promise](17-compatibility.md); it can change in any release, with the version number going up.
+Protocol version: **4**. This is a reference for people working on PyHP itself. Both halves ship in the same package, so the protocol isn't part of the [compatibility promise](17-compatibility.md); it can change in any release, with the version number going up.
 
 ### Start-up
 
@@ -53,13 +53,15 @@ The worker listens on `127.0.0.1` on a random port. PHP connects and the handsha
 
 ### Frames
 
-Every frame is a 4-byte big-endian unsigned length followed by that many bytes of UTF-8 JSON, always an object. A frame longer than `max_message_bytes` is never sent:
+Every frame is a 4-byte big-endian unsigned length followed by that many bytes of UTF-8 JSON, always an object. A message with a `bin` field (an integer) is followed by that many **binary frames**: the same length prefix, then raw bytes, the data of the NumPy arrays in the message (see `ndarray` in [Values](#values)). They're sent right after the JSON frame, in the order the `buf` indexes count. In Python the received frames are attached to the request as `_buffers`, which never goes on the wire.
+
+A frame, JSON or binary, longer than `max_message_bytes` is never sent:
 
 * A request PHP can't send throws `MessageTooLargeException` before anything is written.
 * A response that is too large is replaced by a `too_large` error response.
 * Callback arguments that are too large raise `ConversionError` in Python.
 
-A frame the worker can't read (too long, invalid JSON, not an object) ends the session: the worker writes the reason to its log and exits with code 2. It exits with 0 when PHP closes the connection or sends `shutdown`, and with 3 when PHP never connected.
+A frame the worker can't read (too long, invalid JSON, not an object, a `bin` count that isn't an integer from 0 to 65,536) ends the session: the worker writes the reason to its log and exits with code 2. It exits with 0 when PHP closes the connection or sends `shutdown`, and with 3 when PHP never connected.
 
 ### Requests (PHP → Python)
 
@@ -166,6 +168,7 @@ JSON's own types travel as they are: `null`, booleans, numbers, strings, lists. 
 | `{"$t": "slice", "v": [start, stop, step]}` | PHP → Python | `Py::slice()` |
 | `{"$t": "bytes", "v": "<base64>"}` | both | `bytes` in Python; a PHP string that isn't valid UTF-8. |
 | `{"$t": "float", "v": "nan"}` | both | `nan`, `inf` or `-inf`, which JSON can't carry. |
+| `{"$t": "ndarray", "dtype": "f8", "shape": [1000, 3], "buf": 0}` | both | A NumPy array whose data is binary frame number `buf` of the message: little-endian, C order (row after row). `dtype` is one of `b1`, `i1`, `i2`, `i4`, `i8`, `u1`, `u2`, `u4`, `f4`, `f8`, NumPy's own codes. From Python only in `to_php` results; other dtypes there go value by value (`uint64` as `i8` when every value fits, `float16` as `f4`, `longdouble` as `f8`). From PHP for `Py::ndarray()`; Python gets a writable array over the received bytes, without a copy. |
 
 Values nest at most 256 levels deep.
 
@@ -173,6 +176,7 @@ Values nest at most 256 levels deep.
 
 | Version | PyHP | Change |
 |---|---|---|
+| 4 | 1.0.0 | Binary frames (`bin`) and `ndarray` values: NumPy arrays as raw bytes. |
 | 3 | 0.4.0 | Live output: `stream` and `output` frames; `vectorize` values. |
 | 2 | 0.1.0 | PHP callbacks: `php_call`, `php_return`, `callback` values, `release_callbacks`. |
 | 1 | before 0.1.0 | The first protocol. |

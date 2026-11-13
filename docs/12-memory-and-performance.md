@@ -32,11 +32,21 @@ Copying a 100,000-row × 4-column DataFrame into PHP (Linux):
 | [`Py::rows($df)`](08-pandas-and-numpy.md#copying-tables-into-php) | ~240 ms | ~49 MB | list of rows, 41 MB |
 | [`Py::columns($df)`](08-pandas-and-numpy.md#copying-tables-into-php) | ~180 ms | ~16 MB | one list per column, 11 MB |
 
+Copying NumPy arrays (Linux, PHP 8.3, Python 3.13, measured with [`benchmarks/numpy-transfer.php`](../benchmarks/numpy-transfer.php)):
+
+| Array | As JSON | As raw bytes | |
+|---|---|---|---|
+| 1,000,000 `float64` into PHP | ~740 ms (`->tolist()`) | ~72 ms (`Py::toPhp()`) | 10× |
+| 1,000,000 `int64` into PHP | ~240 ms | ~76 ms | 3× |
+| 1000 × 1000 `float64` into PHP | ~810 ms | ~77 ms | 10× |
+| 1000 × 1000 `uint8` into PHP | ~185 ms | ~67 ms | 3× |
+| 1000 × 1000 `float64` into Python | ~1,400 ms (PHP array, then `np.array()`) | ~207 ms (`Py::ndarray()`) | 7× |
+
 What that means:
 
 * **Per-call overhead is negligible for DataFrame-level work.** Going through 4 proxies instead of one Python expression costs a few milliseconds on a 1M-row groupby.
 * **Per-call overhead dominates chatty code.** 10,000 attribute reads ≈ 1 s. Don't loop over rows from PHP; let pandas/NumPy do it, or write the loop in Python.
-* **Copying is the expensive part, in time and in memory.** Data travels as JSON, and PHP arrays are much bigger than a DataFrame. Use `Py::rows()`/`Py::columns()` for tables (2.5–3.5× faster than `to_dict('records')`; columns need a quarter of the memory), copy summaries rather than datasets, and for very large outputs write a file from Python (`to_csv`, `to_parquet`). PHP's default `memory_limit` of 128 MB (Windows `php.ini`) holds roughly 250k rows × 4 columns as rows, or over 1M as columns.
+* **Copying is the expensive part, in time and in memory.** Data travels as JSON (except NumPy arrays through `Py::toPhp()` and `Py::ndarray()`, which travel as raw bytes), and PHP arrays are much bigger than a DataFrame. Use `Py::toPhp()` for arrays, `Py::rows()`/`Py::columns()` for tables (2.5–3.5× faster than `to_dict('records')`; columns need a quarter of the memory), copy summaries rather than datasets, and for very large outputs write a file from Python (`to_csv`, `to_parquet`). PHP's default `memory_limit` of 128 MB (Windows `php.ini`) holds roughly 250k rows × 4 columns as rows, or over 1M as columns.
 * **Start-up and imports are paid per session.** Reuse a session for many calls instead of creating one per call. Python itself starts more slowly on Windows (~120 ms on the test machine vs ~13 ms on Linux).
 
 The per-call figure is in line with other process-based bridges. In-process embedding (swoole/phpy) is far faster per call; see [the comparison](15-internals.md#pyhp-vs-swoolephpy).

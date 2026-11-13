@@ -30,7 +30,7 @@
 18. Python ints beyond 64 bits, sets, dates, Decimals, `pd.NA`/`NaT` and subclasses of built-ins stay proxies.
 19. PHP objects (`DateTime`, enums, DTOs) and resources can't be sent; convert them first.
 20. Non-UTF-8 PHP strings become `bytes`; Python `bytes` come back as plain strings.
-21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default); `Py::rows()`/`Py::columns()` are the fastest way to copy tables.
+21. Everything copied goes through JSON, except NumPy arrays copied with `Py::toPhp()` or sent with `Py::ndarray()`, which travel as raw bytes. Large copies are slow and capped by `max_message_bytes` (64 MiB default, per message and per array); `Py::rows()`/`Py::columns()` are the fastest way to copy tables.
 
 **Output and diagnostics**
 
