@@ -67,6 +67,8 @@ Tests aren't run on commit (the PHP suite takes about 40 s); `composer check`, p
 
 The `setup-smoke` jobs test `pyhp setup` for real on all three systems, once with uv (forced to download Python) and once with the system Python: `tests/smoke/setup-smoke.php` creates a Composer project that installs PyHP from the checkout plus a local package declaring its own Python requirement, runs `pyhp setup` twice and `pyhp info`, checks that a session runs in the new venv with both packages, writes `pyhp.lock`, and checks that `pyhp setup --exact` removes a stray package. Run it locally with `php tests/smoke/setup-smoke.php` (or `--no-uv`).
 
+`.github/workflows/docker.yml` builds the [Docker image](13-deployment-and-security.md#docker) from `docker/Dockerfile` when a pull request touches it and runs the `pyhp setup` smoke test inside both variants, with uv and with pip; on `main`, weekly and on demand it publishes the image for amd64 and arm64.
+
 macOS runners are free for public repositories. For private ones they use your Actions minutes at a higher rate than Linux (check GitHub's current billing page).
 
 ### Rules the code follows
