@@ -9,6 +9,8 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ## [@dev]
 
 ### Added
+- Tests for the gaps the first PHP mutation run found (82% of 2,714 mutants caught): golden output tests that pin everything `pyhp info` (text and `--json`) and `pyhp setup`/`pyhp lock` print; worker start-up failures (a worker that crashes, hangs or answers the handshake wrongly, played by a fake worker); an oversized callback reply; command-line option forms; odd `installed.json` entries; a lock file with Windows line endings. See `docs/tasks/v1-mutation-report.md`.
+- Minimum mutation scores: the mutation workflow fails below 90% for the PHP library and 85% for the Python worker, and installs the same Python packages as CI so no test is skipped.
 - A Docker base image for PyHP apps, `ghcr.io/pyhp-php/pyhp`: PHP 8.5 with Python 3.13, uv and Composer, in `cli` and `fpm` variants for amd64 and arm64. CI builds it on pull requests and runs the `pyhp setup` smoke tests inside it; it's published from `main` and rebuilt weekly for security updates. See [Deployment](docs/13-deployment-and-security.md#docker).
 - CI runs on ARM: the worker and the PHP library on Linux on ARM (`ubuntu-24.04-arm`) as required checks, plus the `pyhp setup` smoke tests there; Windows on ARM (`windows-11-arm`, with x64 PHP under emulation, as users run it) as a non-blocking job for now. macOS was already Apple Silicon.
 - `pyhp info --json`: the same report as one JSON document (`format: 1`) for scripts, CI and support tools, with the same exit code. Its fields are covered by the compatibility promise: new ones can be added, existing ones keep their meaning. See [The pyhp command](docs/03-command-line.md#pyhp-info---json).
