@@ -100,6 +100,7 @@ CMD ["php", "worker.php"]
 * The token and PyHP's own variables (`PYHP_*`) are removed from `os.environ` before your code runs.
 * PyHP never logs your code, arguments, or variables. The worker log contains only what Python writes to stderr (warnings, and tracebacks of crashes). Without the `log_file` option it's a temporary file only your user can read, deleted when the session closes; if you set `log_file`, keep it out of your web root.
 * The worker's port is passed back through a temporary file only your user can read and write, deleted as soon as PHP has connected.
+* `vendor/bin/pyhp info` and `setup` don't run Python files lying in the project (the working directory is taken off `sys.path` for their checks too), and they print requirement URLs with any credentials hidden: `https://***@example.com/...`. Prefer keeping credentials out of `composer.json` altogether; pip expands environment variables in requirements files (`https://${TOKEN}@example.com/...`), and uv and pip also read `.netrc` and keyrings.
 
 ## Platform support
 

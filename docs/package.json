@@ -4,7 +4,7 @@
   "description": "The PyHP documentation website (VitePress). The pages are the Markdown files in this folder.",
   "scripts": {
     "dev": "vitepress dev",
-    "build": "vitepress build",
+    "build": "vitepress build && node .vitepress/check-links.mjs",
     "preview": "vitepress preview"
   },
   "devDependencies": {

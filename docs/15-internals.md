@@ -58,7 +58,9 @@ Every frame is a 4-byte big-endian unsigned length followed by that many bytes o
 A frame, JSON or binary, longer than `max_message_bytes` is never sent:
 
 * A request PHP can't send throws `MessageTooLargeException` before anything is written.
-* A response that is too large is replaced by a `too_large` error response.
+* A response that is too large is shortened first: its printed output keeps its end behind a note saying how much was cut, then an error loses its traceback and its message is cut. If the value itself is too large, the response is replaced by a `too_large` error response, shortened the same way.
+* Live `output` frames are split so each one fits.
+* Text that isn't valid Unicode (unpaired surrogates, which Python strings allow) is encoded as `?`.
 * Callback arguments that are too large raise `ConversionError` in Python.
 
 A frame the worker can't read (too long, invalid JSON, not an object, a `bin` count that isn't an integer from 0 to 65,536) ends the session: the worker writes the reason to its log and exits with code 2. It exits with 0 when PHP closes the connection or sends `shutdown`, and with 3 when PHP never connected.

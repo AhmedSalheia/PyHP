@@ -43,6 +43,9 @@ export default defineConfig({
             if (href.startsWith('../')) child.attrSet('href', `${repository}/blob/main/${href.slice(3)}`)
             else if (href.startsWith('tasks/')) child.attrSet('href', `${repository}/blob/main/docs/${href}`)
             else if (href === 'README.md') child.attrSet('href', '/')
+            // Chapters are served without their number (01-introduction.md → /introduction),
+            // so links between them must drop it too; VitePress doesn't rewrite them itself.
+            else if (/^(\.\/)?\d{2}-[^/]+\.md(#.*)?$/.test(href)) child.attrSet('href', href.replace(/^(\.\/)?\d{2}-/, './'))
           }
         }
       })

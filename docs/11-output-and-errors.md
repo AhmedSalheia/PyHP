@@ -23,7 +23,8 @@ Limits:
 
 * Only the thread that serves PHP sends live output. What background threads print during a call is sent with the next chunk from the main thread, or when the call ends.
 * **`input()` raises `EOFError`.** The worker has no stdin. Pass data in through `vars` or arguments.
-* Captured output counts toward `max_message_bytes`.
+* Captured output counts toward `max_message_bytes`. When a call prints more than fits, the call still succeeds: the output keeps its end (the most recent lines), behind a line saying how many characters were cut. Live output (`onOutput()`, echo mode) is sent in pieces that always fit.
+* Text that isn't valid Unicode (an unpaired surrogate such as `'\ud800'`, which Python strings allow) arrives as `?`.
 
 ## Errors
 

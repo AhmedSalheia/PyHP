@@ -8,7 +8,16 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+### Security
+- `vendor/bin/pyhp info` no longer runs Python files lying in the project: its interpreter check imported `json` with the project folder first on `sys.path`, so a `json.py` there would run. Without uv, `pyhp setup` ran `python -m venv` and `python -m pip` the same way, so a `venv/` or `pip.py` in the project ran instead; they now run with Python's `-P` flag.
+- The worker no longer crashes when a connection sends an authentication token that isn't valid Unicode (an escaped unpaired surrogate) before PHP connects; the connection is refused and the worker keeps waiting for PHP.
+- `pyhp info` and `pyhp setup` hide credentials in URLs they print (`https://***@example.com/...`), so private index or package URLs don't end up in terminals, CI logs or support reports. Commands still get the real URLs.
+
 ### Fixed
+- Links between pages on the documentation website work: they still used the numbered file names (`01-introduction`), which the site serves without the number (`/introduction`), so the home page's reading list and the links inside chapters led to 404 pages. A check after the build now fails on such links.
+- Printed output can no longer end a session: when a call prints more than `max_message_bytes`, the call succeeds and the output keeps its end, behind a line saying how many characters were cut. Before, the error sent instead was itself too large and PHP closed the session. Long error messages and tracebacks are cut to fit too, and live output is sent in pieces that fit.
+- Printing text that isn't valid Unicode (an unpaired surrogate, which Python strings allow) no longer stops the worker; it arrives as `?`.
+- A long-running session no longer keeps the source of every `exec()` and `eval()` forever: only the 1,000 most recent snippets keep theirs for tracebacks.
 - The documentation website loads its styles and scripts: it was built for `/pyhp/`, but GitHub Pages serves it at `/PyHP/` (the repository's name, case-sensitive). CI now builds it for the path Pages reports.
 - A test of `pyhp info`'s worker timing no longer fails on Windows runners, where `usleep()` can return a timer tick early (it measured 47 ms for a 60 ms sleep). Tests only; PyHP itself is unchanged.
 

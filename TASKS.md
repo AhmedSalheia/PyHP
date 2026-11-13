@@ -7,13 +7,14 @@ Goal: people can build products on PyHP without fearing breaking changes: a revi
 Decisions (2026-11-13): the Docker image is a base for apps (PHP + Python + uv + Composer; PyHP stays a Composer dependency), `cli` and `fpm` variants of PHP 8.5, amd64 and arm64, published to ghcr.io/pyhp-php/pyhp. Decisions (2026-11-09): deprecations warn with `E_USER_DEPRECATED` for at least one minor release before removal in a major; end-of-life PHP/Python versions may be dropped in a minor; fixes only for the latest minor. 1.0 comes before `pyhp/laravel`; release candidates first (`1.0.0-rc1`, then `1.0.0`); production use is a soft goal (Ahmed's own projects), not a gate; docs website with VitePress on GitHub Pages; support is PHP 8.2+ (64-bit) and Python 3.11+ (3.10 is end-of-life; dropped before 1.0). CI: newest PHP 8.5 required, 8.6 as a non-blocking job until it's final (19 Nov 2026).
 
 ### Today: 2026-11-13
-- [r] Release 1.0.0-rc1 (branch: release/1.0.0-rc1)
+- [r] Fixes from the rc1 review: worker auth, output size and Unicode, linecache, info/setup import path, URL credentials (branch: fix/rc1-review)
 
 ### Backlog (this scope)
 - [ ] Use PyHP in a real project of Ahmed's and fold in the feedback (soft goal)
 - [ ] Release 1.0.0 after the release candidate has been tried (soft goal above, or about a week without blocking issues)
 
 ### Done (this scope)
+- [x] Released 1.0.0-rc1 (PR #58, tag v1.0.0-rc1); fixes: Windows timing test (#60), website base path (#61, hotfix #62)
 - [x] Docs website: VitePress from docs/, GitHub Pages from main, search, upgrade guide (PR #57)
 - [x] Windows on ARM and PHP 8.6 jobs required in CI (PR #56)
 - [x] Faster NumPy transfer: binary frames, `Py::toPhp()` of arrays, `Py::ndarray()`; protocol 4 (PR #55)
