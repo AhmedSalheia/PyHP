@@ -66,7 +66,7 @@ test('setup --no-uv uses the system Python', function (): void {
 
     ($this->app)($runner)->run(['setup', '--no-uv', '--dry-run'], $this->root);
 
-    expect(implode('', $this->output->getArrayCopy()))->toContain('> /usr/bin/python3 -m venv');
+    expect(implode('', $this->output->getArrayCopy()))->toContain('> /usr/bin/python3 -P -m venv');
 });
 
 test('wrong usage exits with 2 and a message on stderr', function (array $args, string $message): void {

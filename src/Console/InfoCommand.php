@@ -17,6 +17,7 @@ use PyHP\Setup\LockFile;
 use PyHP\Setup\ProjectRequirements;
 use PyHP\Setup\PythonLocation;
 use PyHP\Setup\PythonSource;
+use PyHP\Setup\Redact;
 use PyHP\Setup\Requirement;
 use PyHP\Setup\SetupConfig;
 use stdClass;
@@ -33,9 +34,15 @@ final class InfoCommand
     /**
      * Prints the interpreter's details and the installed versions of the package
      * names given as a JSON list in argv[1] (null when not installed).
+     *
+     * Its first line takes the working directory off sys.path before anything is
+     * imported, so a json.py or platform.py in the project can't run: `python -c`
+     * puts the working directory first. (-I would also hide user site-packages,
+     * which the worker does see.)
      */
     public const PYTHON_PROBE = <<<'PY'
-        import json, platform, sys
+        import os, sys; sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != os.getcwd()]
+        import json, platform
         from importlib import metadata
         packages = {}
         for name in json.loads(sys.argv[1]):
@@ -92,12 +99,12 @@ final class InfoCommand
         $this->problemsReport();
 
         if ($json) {
-            ($this->out)(json_encode([
+            ($this->out)(Redact::urls(json_encode([
                 'format' => self::FORMAT,
                 'ok' => $this->problems === [],
                 ...$this->report,
                 'problems' => $this->problems,
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).PHP_EOL);
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)).PHP_EOL);
         }
 
         return $this->problems === [] ? 0 : 1;
@@ -390,6 +397,6 @@ final class InfoCommand
         if ($this->json) {
             return;
         }
-        ($this->out)($line.PHP_EOL);
+        ($this->out)(Redact::urls($line).PHP_EOL);
     }
 }

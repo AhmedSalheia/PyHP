@@ -20,6 +20,13 @@ final class Installer
 
     public const MIN_PYTHON = '3.11';
 
+    /**
+     * Python's -P (3.11+): `python -m venv` and `python -m pip` run from the project
+     * folder, and without it Python would look for venv and pip there first, so a
+     * venv/ or pip.py in the project would run instead.
+     */
+    private const SAFE_PATH = '-P';
+
     public const UV_INSTALL_URL = 'https://docs.astral.sh/uv/getting-started/installation/';
 
     /**
@@ -131,7 +138,7 @@ final class Installer
         $overrideFile = $requirements->overrides() === [] ? null : self::temporaryFile($requirements->overrides());
         $install = $uv !== null
             ? [$uv, 'pip', 'install', '--python', $python, ...$packages, ...($overrideFile !== null ? ['--override', $overrideFile] : [])]
-            : [$python, '-m', 'pip', 'install', ...$packages];
+            : [$python, self::SAFE_PATH, '-m', 'pip', 'install', ...$packages];
         try {
             $installed = $this->step($install, $root, $dryRun);
         } finally {
@@ -160,7 +167,7 @@ final class Installer
             ? $this->sync(LockFile::NAME, $root, $python, $uv, $dryRun)
             : $this->step($uv !== null
                 ? [$uv, 'pip', 'install', '--python', $python, '-r', LockFile::NAME]
-                : [$python, '-m', 'pip', 'install', '-r', LockFile::NAME], $root, $dryRun);
+                : [$python, self::SAFE_PATH, '-m', 'pip', 'install', '-r', LockFile::NAME], $root, $dryRun);
     }
 
     /** --exact without a lock file: resolve into a temporary lock, then sync to it. */
@@ -222,7 +229,7 @@ final class Installer
         $version = $this->runner->capture([...$python, '-c', self::VERSION_PROBE], $root) ?? 'unknown';
         $report = self::temporaryFile([]);
         try {
-            $command = [...$python, '-m', 'pip', 'install', '--dry-run', '--ignore-installed', '--quiet', '--report', $report, ...$requirements->installArguments()];
+            $command = [...$python, self::SAFE_PATH, '-m', 'pip', 'install', '--dry-run', '--ignore-installed', '--quiet', '--report', $report, ...$requirements->installArguments()];
             if (! $this->step($command, $root, $dryRun)) {
                 $this->explainFailure($requirements);
 
@@ -247,7 +254,7 @@ final class Installer
         if ($uv !== null) {
             return $this->step([$uv, 'pip', 'sync', '--python', $python, $lock], $root, $dryRun);
         }
-        if (! $this->step([$python, '-m', 'pip', 'install', '-r', $lock], $root, $dryRun)) {
+        if (! $this->step([$python, self::SAFE_PATH, '-m', 'pip', 'install', '-r', $lock], $root, $dryRun)) {
             return false;
         }
         if ($dryRun) {
@@ -256,7 +263,7 @@ final class Installer
             return true;
         }
 
-        $listed = $this->runner->capture([$python, '-m', 'pip', 'list', '--format=json'], $root);
+        $listed = $this->runner->capture([$python, self::SAFE_PATH, '-m', 'pip', 'list', '--format=json'], $root);
         $installed = $listed === null ? null : json_decode($listed, true);
         if (! is_array($installed)) {
             $this->say('Could not read the installed packages from pip list; nothing was removed.');
@@ -272,7 +279,7 @@ final class Installer
             }
         }
 
-        return $extra === [] || $this->step([$python, '-m', 'pip', 'uninstall', '-y', ...$extra], $root, $dryRun);
+        return $extra === [] || $this->step([$python, self::SAFE_PATH, '-m', 'pip', 'uninstall', '-y', ...$extra], $root, $dryRun);
     }
 
     /** @param list<string> $arguments install arguments ("-r", "file" become one "-r file" line) */
@@ -350,7 +357,7 @@ final class Installer
     {
         $python = $this->systemPython($version, $root);
 
-        return $python === null ? null : [...$python, '-m', 'venv', $venv];
+        return $python === null ? null : [...$python, self::SAFE_PATH, '-m', 'venv', $venv];
     }
 
     /**
@@ -444,6 +451,6 @@ final class Installer
 
     private function say(string $line): void
     {
-        ($this->write)($line);
+        ($this->write)(Redact::urls($line));
     }
 }

@@ -88,8 +88,8 @@ test('setup without uv falls back to the first working Python and suggests uv', 
     expect($code)->toBe(0)
         ->and($this->lines->getArrayCopy())->toBe([
             'Python 3.13 was not found, so Python 3.12 is used instead. With uv installed, setup can download the exact version.',
-            "> /usr/bin/python3 -m venv {$this->venv}",
-            "> {$this->python} -m pip install six",
+            "> /usr/bin/python3 -P -m venv {$this->venv}",
+            "> {$this->python} -P -m pip install six",
             'Tip: install uv ('.UV_TIP.') for much faster installs and any Python version on demand.',
             "Done. PyHP will use {$this->python} automatically.",
         ]);
@@ -104,8 +104,8 @@ test('setup without uv and without a version request uses the first Python silen
 
     (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig(requirements: ['six']), $this->root, useUv: false);
 
-    expect($this->lines->getArrayCopy()[0])->toBe("> /usr/bin/python3 -m venv {$this->venv}")
-        ->and($runner->commandLines()[0])->toBe("/usr/bin/python3 -m venv {$this->venv}");
+    expect($this->lines->getArrayCopy()[0])->toBe("> /usr/bin/python3 -P -m venv {$this->venv}")
+        ->and($runner->commandLines()[0])->toBe("/usr/bin/python3 -P -m venv {$this->venv}");
 });
 
 test('a dry run prints every command, quoting paths with spaces, and changes nothing', function (): void {
@@ -263,7 +263,7 @@ test('on Windows without a version request, the py launcher comes first, then py
 
     (new Installer($runner, $this->write, 'Windows'))->install(new SetupConfig(requirements: ['six']), $this->root, useUv: false);
 
-    expect($runner->commandLines()[0])->toBe("{$expected} -m venv {$this->venv}");
+    expect($runner->commandLines()[0])->toBe("{$expected} -P -m venv {$this->venv}");
 })->with([
     'both' => [['py' => 'C:\py.exe', 'python' => 'C:\python.exe'], 'C:\py.exe -3'],
     'only python' => [['python' => 'C:\python.exe'], 'C:\python.exe'],
@@ -303,7 +303,7 @@ test('setup --exact without uv resolves with the venv\'s own Python and removes 
 
     $resolve = $runner->commandLines()[1];
     $report = explode(' ', explode(' --report ', $resolve)[1])[0];
-    expect($resolve)->toStartWith("{$this->python} -m pip install --dry-run --ignore-installed --quiet --report ")
+    expect($resolve)->toStartWith("{$this->python} -P -m pip install --dry-run --ignore-installed --quiet --report ")
         ->and($resolve)->toEndWith(' six')
         ->and(file_exists($report))->toBeFalse();
 });

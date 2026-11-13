@@ -102,8 +102,8 @@ test('without uv it uses a system Python with venv and pip', function (): void {
     $python = VirtualEnv::python($this->venv, 'Linux');
     expect($code)->toBe(0)
         ->and($runner->commandLines())->toBe([
-            "/usr/bin/python3 -m venv {$this->venv}",
-            "{$python} -m pip install pandas",
+            "/usr/bin/python3 -P -m venv {$this->venv}",
+            "{$python} -P -m pip install pandas",
         ])
         ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('uv');
 });
@@ -117,7 +117,7 @@ test('without uv a requested version is looked for first', function (): void {
 
     (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig(python: '3.12'), $this->root);
 
-    expect($runner->commandLines()[0])->toBe("/usr/bin/python3.12 -m venv {$this->venv}");
+    expect($runner->commandLines()[0])->toBe("/usr/bin/python3.12 -P -m venv {$this->venv}");
 });
 
 test('on Windows the py launcher is used to pick the version', function (): void {
@@ -129,7 +129,7 @@ test('on Windows the py launcher is used to pick the version', function (): void
 
     (new Installer($runner, $this->write, 'Windows'))->install(new SetupConfig(python: '3.12'), $this->root);
 
-    expect($runner->commandLines()[0])->toBe("C:\\Windows\\py.exe -3.12 -m venv {$this->venv}");
+    expect($runner->commandLines()[0])->toBe("C:\\Windows\\py.exe -3.12 -P -m venv {$this->venv}");
 });
 
 test('a different version is used, with a warning, when the requested one is missing', function (): void {
@@ -142,7 +142,7 @@ test('a different version is used, with a warning, when the requested one is mis
     $code = (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig(python: '3.13'), $this->root);
 
     expect($code)->toBe(0)
-        ->and($runner->commandLines()[0])->toBe("/usr/bin/python3 -m venv {$this->venv}")
+        ->and($runner->commandLines()[0])->toBe("/usr/bin/python3 -P -m venv {$this->venv}")
         ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('3.13')
         ->and(implode("\n", $this->lines->getArrayCopy()))->toContain('3.11');
 });
@@ -176,7 +176,7 @@ test('useUv false skips uv even when it is installed', function (): void {
 
     (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig, $this->root, useUv: false);
 
-    expect($runner->commandLines()[0])->toStartWith('/usr/bin/python3 -m venv');
+    expect($runner->commandLines()[0])->toStartWith('/usr/bin/python3 -P -m venv');
 });
 
 test('a failing step stops the setup and reports the command', function (): void {
@@ -235,7 +235,7 @@ test('a Python that cannot report its version is skipped', function (): void {
 
     (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig, $this->root);
 
-    expect($runner->commandLines()[0])->toBe("/usr/bin/python -m venv {$this->venv}");
+    expect($runner->commandLines()[0])->toBe("/usr/bin/python -P -m venv {$this->venv}");
 });
 
 test('requirements of installed Composer packages are listed and installed', function (): void {

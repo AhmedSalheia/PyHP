@@ -106,7 +106,7 @@ test('a Python that is too old is skipped for a later one that is new enough', f
     $code = (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig(requirements: ['six']), $this->root, useUv: false);
 
     expect($code)->toBe(0)
-        ->and($runner->commandLines()[0])->toBe("/usr/bin/python -m venv {$this->venv}");
+        ->and($runner->commandLines()[0])->toBe("/usr/bin/python -P -m venv {$this->venv}");
 });
 
 test('a lock without uv says it only fits this system and records how it was made', function (): void {
@@ -155,14 +155,14 @@ test('setup --exact without uv ignores pip list entries that are not packages', 
     touch($this->python);
     file_put_contents($this->root.'/pyhp.lock', LockFile::withHeader("six==1.17.0\n", 'x', 'pip'));
     $listed = json_encode([5, 'six', ['version' => '1.0'], ['name' => 7], ['name' => 'six'], ['name' => 'Extra_Thing']]);
-    $runner = new FakeCommandRunner(captures: ["{$this->python} -m pip list --format=json" => (string) $listed]);
+    $runner = new FakeCommandRunner(captures: ["{$this->python} -P -m pip list --format=json" => (string) $listed]);
 
     $code = (new Installer($runner, $this->write, 'Linux'))->install(new SetupConfig(requirements: ['six']), $this->root, exact: true);
 
     expect($code)->toBe(0)
         ->and($runner->commandLines())->toBe([
-            "{$this->python} -m pip install -r pyhp.lock",
-            "{$this->python} -m pip uninstall -y extra-thing",
+            "{$this->python} -P -m pip install -r pyhp.lock",
+            "{$this->python} -P -m pip uninstall -y extra-thing",
         ]);
 });
 
