@@ -7,13 +7,15 @@ Goal: people can build products on PyHP without fearing breaking changes: a revi
 Decisions (2026-11-13): the Docker image is a base for apps (PHP + Python + uv + Composer; PyHP stays a Composer dependency), `cli` and `fpm` variants of PHP 8.5, amd64 and arm64, published to ghcr.io/pyhp-php/pyhp. Decisions (2026-11-09): deprecations warn with `E_USER_DEPRECATED` for at least one minor release before removal in a major; end-of-life PHP/Python versions may be dropped in a minor; fixes only for the latest minor. 1.0 comes before `pyhp/laravel`; release candidates first (`1.0.0-rc1`, then `1.0.0`); production use is a soft goal (Ahmed's own projects), not a gate; docs website with VitePress on GitHub Pages; support is PHP 8.2+ (64-bit) and Python 3.11+ (3.10 is end-of-life; dropped before 1.0). CI: newest PHP 8.5 required, 8.6 as a non-blocking job until it's final (19 Nov 2026).
 
 ### Today: 2026-11-13
-- [r] Docs website: VitePress from docs/, GitHub Pages from main, search, upgrade guide (branch: docs/website)
+- [r] Release 1.0.0-rc1 (branch: release/1.0.0-rc1)
 
 ### Backlog (this scope)
 - [ ] Use PyHP in a real project of Ahmed's and fold in the feedback (soft goal)
-- [ ] Release 1.0.0-rc1, then 1.0.0
+- [ ] Release 1.0.0 after the release candidate has been tried (soft goal above, or about a week without blocking issues)
 
 ### Done (this scope)
+- [x] Docs website: VitePress from docs/, GitHub Pages from main, search, upgrade guide (PR #57)
+- [x] Windows on ARM and PHP 8.6 jobs required in CI (PR #56)
 - [x] Faster NumPy transfer: binary frames, `Py::toPhp()` of arrays, `Py::ndarray()`; protocol 4 (PR #55)
 - [x] Exact worker error messages and the last PHP mutation gaps: PHP 93.55%, worker 91.6% (PR #53)
 - [x] PHP mutation gaps: golden output tests for info/setup/lock, fake-worker start-up tests; minimum scores 90% (PHP) and 85% (worker) (test/mutation-gaps)
@@ -34,9 +36,9 @@ Decisions (2026-11-13): the Docker image is a base for apps (PHP + Python + uv +
 
 ### Notes for next session
 - Docs website: after the first merge to main, set Settings → Pages → Source to "GitHub Actions" once, then run the Docs website workflow (or merge to main) to publish.
-- When the windows-11-arm jobs have been green for a while, make them required (drop the continue-on-error) and update docs/13 and docs/16.
 - Mutation scores (2026-11-13): PHP 93.55% (was 93.00%), worker 91.6% (was 85.9%), both measured in CI on mutation/exact. Remaining survivors are equivalent or not worth a test; see docs/tasks/v1-mutation-report.md.
-- After PHP 8.6.0 is released (19 Nov 2026): make 8.6 the required newest PHP in CI (replacing 8.5, dropping the experimental job) and update docs/13 and docs/16.
+- After PHP 8.6.0 is released (19 Nov 2026): make 8.6 the newest PHP in the main CI matrix (replacing 8.5 and the separate 8.6 job) and update docs/16.
+- After the first Docker publish from main: make the ghcr.io/pyhp-php/pyhp package public (Packages → Package settings → Change visibility).
 - v0.3.0 and v0.4.0 tasks are archived in docs/tasks/.
 - `pyhp/laravel` follows 1.0 (Scope 7).
 - ClickUp sync not set up for PyHP yet; TASKS.md is the source of truth.
