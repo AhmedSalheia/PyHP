@@ -27,7 +27,10 @@ use PyHP\Exception\WorkerStartException;
  */
 final class Worker
 {
-    public const PROTOCOL_VERSION = 3;
+    public const PROTOCOL_VERSION = 4;
+
+    /** Bytes handed to fwrite() at a time when writing a large frame. */
+    private const WRITE_CHUNK = 1 << 20;
 
     private const POLL_SECONDS = 0.05;
 
@@ -114,12 +117,15 @@ final class Worker
     }
 
     /**
-     * Send one frame. The deadline is shared by everything belonging to one call;
-     * $timeout is only used in the error message.
+     * Send one message: its JSON frame, then one binary frame per buffer (the
+     * message's "bin" field says how many). The deadline is shared by everything
+     * belonging to one call; $timeout is only used in the error message.
+     *
+     * @param  list<string>  $buffers
      */
-    public function send(string $message, ?float $deadline, ?float $timeout): void
+    public function send(string $message, array $buffers, ?float $deadline, ?float $timeout): void
     {
-        $size = strlen($message);
+        $size = max([strlen($message), ...array_map(strlen(...), $buffers)]);
         if ($size > $this->maxMessageBytes) {
             throw new MessageTooLargeException(
                 "The message is {$size} bytes, above the {$this->maxMessageBytes}-byte max_message_bytes limit."
@@ -127,7 +133,11 @@ final class Worker
         }
 
         try {
-            $this->write(pack('N', $size).$message, $deadline);
+            $this->write(pack('N', strlen($message)).$message, $deadline);
+            foreach ($buffers as $buffer) {
+                $this->write(pack('N', strlen($buffer)), $deadline);
+                $this->write($buffer, $deadline);
+            }
         } catch (TimeoutException $error) {
             throw $this->timedOut($timeout, $error);
         }
@@ -216,13 +226,18 @@ final class Worker
 
     private function write(string $data, ?float $deadline): void
     {
-        while ($data !== '') {
+        // Track an offset instead of cutting the string after every partial write,
+        // which would copy the rest of a large array's bytes again and again.
+        $length = strlen($data);
+        $offset = 0;
+        while ($offset < $length) {
             $this->waitFor('write', $deadline);
-            $written = @fwrite($this->socket, $data);
+            $chunk = $offset === 0 && $length <= self::WRITE_CHUNK ? $data : substr($data, $offset, self::WRITE_CHUNK);
+            $written = @fwrite($this->socket, $chunk);
             if ($written === false) {
                 throw $this->crashed();
             }
-            $data = substr($data, $written);
+            $offset += $written;
         }
     }
 
@@ -344,7 +359,7 @@ final class Worker
 
         if (! is_resource($process)) {
             throw new WorkerStartException(sprintf(
-                'Could not start Python using "%s"%s. Set the "python" option to the full path of a Python 3.10+ interpreter.',
+                'Could not start Python using "%s"%s. Set the "python" option to the full path of a Python 3.11+ interpreter.',
                 $config->python,
                 $launchErrors->count() === 0 ? '' : ': '.implode('; ', $launchErrors->getArrayCopy()),
             ));

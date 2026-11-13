@@ -31,8 +31,11 @@ final readonly class Config
 
     private const OPTIONS = [
         'python', 'timeout', 'startup_timeout', 'cwd', 'env', 'inherit_env',
-        'paths', 'output', 'max_message_bytes', 'log_file', 'iter_batch_size', 'restart',
+        'paths', 'output', 'max_message_bytes', 'log_file', 'iter_batch_size', 'auto_restart',
     ];
+
+    /** Options that were renamed, so old code gets a hint instead of a bare "unknown option". */
+    private const RENAMED = ['restart' => 'auto_restart'];
 
     public string $python;
 
@@ -49,7 +52,7 @@ final readonly class Config
      * @param  int  $maxMessageBytes  Largest request or result allowed on the wire.
      * @param  string|null  $logFile  Where the worker's stderr goes; null uses a temp file deleted on close.
      * @param  int  $iterBatchSize  Items fetched per round trip when iterating with foreach.
-     * @param  bool  $restart  Start a fresh worker on the next call after a crash or timeout (and run the onStart hooks).
+     * @param  bool  $autoRestart  Start a fresh worker on the next call after a crash or timeout (and run the onStart hooks).
      */
     public function __construct(
         ?string $python = null,
@@ -63,7 +66,7 @@ final readonly class Config
         public int $maxMessageBytes = self::DEFAULT_MAX_MESSAGE_BYTES,
         public ?string $logFile = null,
         public int $iterBatchSize = self::DEFAULT_ITER_BATCH_SIZE,
-        public bool $restart = false,
+        public bool $autoRestart = false,
     ) {
         $this->python = $python ?? self::detectPython();
 
@@ -106,6 +109,8 @@ final readonly class Config
     /**
      * Like detectPython(), but also says which rule picked the interpreter and
      * where the project's venv is expected (null when there's no Composer project).
+     *
+     * @internal Used by `pyhp info`; call detectPython() instead.
      *
      * @param  string|null  $projectRoot  null means the root of the Composer project PyHP is installed in
      */
@@ -152,6 +157,9 @@ final readonly class Config
     public function with(array $options): self
     {
         foreach (array_keys($options) as $key) {
+            if (isset(self::RENAMED[$key])) {
+                throw new ConfigException(sprintf('PyHP option "%s" was renamed to "%s".', $key, self::RENAMED[$key]));
+            }
             if (! in_array($key, self::OPTIONS, true)) {
                 throw new ConfigException(sprintf(
                     'Unknown PyHP option "%s". Valid options: %s.',
@@ -176,7 +184,7 @@ final readonly class Config
             logFile: array_key_exists('log_file', $options) ? self::nullableString($options, 'log_file') : $this->logFile,
             iterBatchSize: array_key_exists('iter_batch_size', $options)
                 ? self::int($options, 'iter_batch_size') : $this->iterBatchSize,
-            restart: array_key_exists('restart', $options) ? self::bool($options, 'restart') : $this->restart,
+            autoRestart: array_key_exists('auto_restart', $options) ? self::bool($options, 'auto_restart') : $this->autoRestart,
         );
     }
 

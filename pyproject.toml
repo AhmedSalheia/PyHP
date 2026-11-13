@@ -2,7 +2,7 @@
 # The worker itself is stdlib-only and is not installed as a package.
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 100
 src = ["python", "tests/python"]
 
@@ -16,13 +16,13 @@ select = ["E", "F", "W", "I", "B", "UP", "N", "S", "ANN", "SIM", "RUF"]
 "python/pyhp_worker.py" = ["S102", "S307"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 files = ["python", "tests/python"]
 mypy_path = "python"
 
 [[tool.mypy.overrides]]
-# Optional test-only dependency; its stubs need a newer Python than our 3.10 target.
+# Optional test-only dependency; its stubs need a newer Python than our 3.11 target.
 module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 follow_imports_for_stubs = true
@@ -40,3 +40,11 @@ patch = ["subprocess"]
 [tool.coverage.report]
 fail_under = 80
 show_missing = true
+
+[tool.mutmut]
+# Mutation testing of the worker with mutmut 2 (`pip install "mutmut<3"`): it changes
+# the worker in place, one small change at a time, and runs the tests; every change
+# the tests don't catch ("survived") is a gap. `mutmut run`, then `mutmut results`.
+paths_to_mutate = "python/pyhp_worker.py"
+runner = "python -m pytest -x -q -p no:cacheprovider"
+tests_dir = "tests/python/"

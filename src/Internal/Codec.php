@@ -11,6 +11,7 @@ use PyHP\Exception\StaleProxyException;
 use PyHP\PyObject;
 use PyHP\Session;
 use PyHP\Value\Dict;
+use PyHP\Value\NdArray;
 use PyHP\Value\Slice;
 use PyHP\Value\Tuple;
 use PyHP\Value\Vectorized;
@@ -36,6 +37,14 @@ final class Codec
 
     /** @var (Closure(PyObject): array{0: Session, 1: int, 2: int})|null */
     private static ?Closure $unwrap = null;
+
+    /**
+     * Data of the arrays encoded since the last takeBuffers(), sent as binary
+     * frames after the message; an "ndarray" tag refers to its buffer by index.
+     *
+     * @var list<string>
+     */
+    private array $buffers = [];
 
     public function __construct(private readonly Session $session) {}
 
@@ -106,6 +115,7 @@ final class Codec
                 'v' => array_map(fn (mixed $item): mixed => $this->encode($item, $depth + 1), $value->items),
             ],
             $value instanceof Slice => ['$t' => 'slice', 'v' => [$value->start, $value->stop, $value->step]],
+            $value instanceof NdArray => $this->encodeNdArray($value),
             $value instanceof Dict => $this->encodeDict($value->items, $depth),
             $value instanceof Closure => ['$t' => 'callback', 'id' => $this->session->callbackId($value)],
             $value instanceof Vectorized => [
@@ -115,7 +125,7 @@ final class Codec
             ],
             default => throw new ConversionException(sprintf(
                 'A PHP %s cannot be sent to Python. Send scalars, arrays, Python object proxies, '
-                .'or Py::tuple()/Py::slice()/Py::dict() values.',
+                .'or Py::tuple()/Py::slice()/Py::dict()/Py::ndarray() values.',
                 get_debug_type($value),
             )),
         };
@@ -150,13 +160,16 @@ final class Codec
      * key; a Python dict that really has a "$t" key arrives wrapped in a "dict"
      * tag, so the two can't be confused.
      */
-    public function decode(mixed $data): mixed
+    /**
+     * @param  list<string>  $buffers  the binary frames that came with the message
+     */
+    public function decode(mixed $data, array $buffers = []): mixed
     {
         if (! is_array($data)) {
             return $data;
         }
         if (! array_key_exists('$t', $data)) {
-            return array_map(fn (mixed $item): mixed => $this->decode($item), $data);
+            return array_map(fn (mixed $item): mixed => $this->decode($item, $buffers), $data);
         }
 
         $tag = $data['$t'];
@@ -165,7 +178,8 @@ final class Codec
         return match ($tag) {
             'ref' => $this->decodeRef($data),
             'callback' => $this->session->callback(is_int($data['id'] ?? null) ? $data['id'] : -1),
-            'dict' => $this->decodeDict($data['o'] ?? null),
+            'dict' => $this->decodeDict($data['o'] ?? null, $buffers),
+            'ndarray' => $this->decodeNdArray($data, $buffers),
             'bytes' => $this->decodeBytes($raw),
             'float' => match ($raw) {
                 'nan' => NAN,
@@ -175,6 +189,19 @@ final class Codec
             },
             default => throw new ProtocolException('Unknown value tag on the wire: '.json_encode($tag)),
         };
+    }
+
+    /**
+     * The buffers of the arrays encoded since the last call, in tag order.
+     *
+     * @return list<string>
+     */
+    public function takeBuffers(): array
+    {
+        $buffers = $this->buffers;
+        $this->buffers = [];
+
+        return $buffers;
     }
 
     /**
@@ -255,13 +282,54 @@ final class Codec
     /**
      * @return array<array-key, mixed>
      */
-    private function decodeDict(mixed $object): array
+    /**
+     * @param  list<string>  $buffers
+     * @return array<array-key, mixed>
+     */
+    private function decodeDict(mixed $object, array $buffers): array
     {
         if (! is_array($object)) {
             throw new ProtocolException('Invalid dict on the wire.');
         }
 
-        return array_map(fn (mixed $item): mixed => $this->decode($item), $object);
+        return array_map(fn (mixed $item): mixed => $this->decode($item, $buffers), $object);
+    }
+
+    /**
+     * @return array{'$t': 'ndarray', dtype: string, shape: list<int>, buf: int}
+     */
+    private function encodeNdArray(NdArray $array): array
+    {
+        [$dtype, $shape, $bytes] = ArrayPacker::pack($array);
+        $this->buffers[] = $bytes;
+
+        return ['$t' => 'ndarray', 'dtype' => $dtype, 'shape' => $shape, 'buf' => count($this->buffers) - 1];
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $data
+     * @param  list<string>  $buffers
+     */
+    private function decodeNdArray(array $data, array $buffers): mixed
+    {
+        $dtype = $data['dtype'] ?? null;
+        $shape = $data['shape'] ?? null;
+        $index = $data['buf'] ?? null;
+        if (! is_string($dtype) || ! is_array($shape) || ! is_int($index)) {
+            throw new ProtocolException('Invalid array on the wire.');
+        }
+        $sizes = [];
+        foreach ($shape as $size) {
+            if (! is_int($size) || $size < 0) {
+                throw new ProtocolException('Invalid array on the wire.');
+            }
+            $sizes[] = $size;
+        }
+        if (! isset($buffers[$index])) {
+            throw new ProtocolException("The worker referred to array buffer #{$index}, which it did not send.");
+        }
+
+        return ArrayPacker::unpack($dtype, $sizes, $buffers[$index]);
     }
 
     private function decodeBytes(mixed $raw): string

@@ -62,7 +62,7 @@ $row['when']->isoformat();    // "2024-01-02"
 
 ### `Py::toPhp()` (strict conversion)
 
-`Py::toPhp($proxy)` copies the whole object or fails. It accepts everything automatic conversion accepts, plus `set`/`frozenset` (as lists) and subclasses of built-in types. It throws `ConversionException` instead of producing nested proxies, and also on cycles or nesting deeper than 256 levels. Use it when you need to be sure you have plain PHP data, for example before `json_encode()`.
+`Py::toPhp($proxy)` copies the whole object or fails. It accepts everything automatic conversion accepts, plus `set`/`frozenset` (as lists), subclasses of built-in types and NumPy arrays (as nested arrays, copied as raw bytes; see [NumPy arrays](08-pandas-and-numpy.md#numpy-arrays)). It throws `ConversionException` instead of producing nested proxies, and also on cycles or nesting deeper than 256 levels. Use it when you need to be sure you have plain PHP data, for example before `json_encode()`.
 
 ---
 

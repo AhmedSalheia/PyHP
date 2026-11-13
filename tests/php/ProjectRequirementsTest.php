@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use PyHP\Exception\ConfigException;
 use PyHP\Setup\ProjectRequirements;
+use PyHP\Setup\Requirement;
 use PyHP\Setup\SetupConfig;
 
 beforeEach(function (): void {
@@ -132,6 +133,8 @@ test('a package with invalid Python requirements is reported by name, with the w
     expect(fn () => ProjectRequirements::collect($this->root, new SetupConfig))
         ->toThrow(ConfigException::class, $message);
 })->with([
+    'empty entry' => [['requirements' => ['spacy', '']], 'every requirement must be a string'],
+    'blank entry' => [['requirements' => ['spacy', '   ']], 'every requirement must be a string'],
     'wrong type' => [['requirements' => 5], 'acme/broken'],
     'non-string entry' => [['requirements' => ['spacy', 3]], 'ignore-packages'],
     'missing file' => [['requirements' => 'nope.txt'], 'nope.txt'],
@@ -168,3 +171,78 @@ test('odd installed.json entries are skipped and a missing install-path falls ba
 
     expect(described(ProjectRequirements::collect($this->root, new SetupConfig)))->toBe(['acme/nlp: spacy']);
 });
+
+test('packages without Python requirements before others are skipped, not the end of the list', function (): void {
+    installPackages($this->root, [
+        'acme/plain' => [],
+        'pyhp/pyhp' => ['extra' => ['pyhp' => ['requirements' => ['pytest']]]],
+        'acme/nlp' => ['extra' => ['pyhp' => ['requirements' => ['spacy']]]],
+        'acme/legacy' => ['extra' => ['pyhp' => ['requirements' => ['tensorflow']]]],
+        'acme/charts' => ['extra' => ['pyhp' => ['requirements' => ['matplotlib']]]],
+    ]);
+
+    $requirements = ProjectRequirements::collect($this->root, new SetupConfig(requirements: ['pandas'], ignorePackages: ['acme/legacy']));
+
+    expect(described($requirements))->toBe(['your project: pandas', 'acme/nlp: spacy', 'acme/charts: matplotlib'])
+        ->and(array_map(fn ($r): string => $r->spec, $requirements->fromPackages()))->toBe(['spacy', 'matplotlib'])
+        ->and($requirements->ignored())->toBe(['acme/legacy']);
+});
+
+test('the first spelling of a package name is the one reported', function (): void {
+    installPackages($this->root, ['acme/a' => ['extra' => ['pyhp' => ['requirements' => ['pandas<3']]]]]);
+
+    $requirements = ProjectRequirements::collect($this->root, new SetupConfig(requirements: ['Pandas>=2']));
+
+    expect($requirements->names())->toBe(['Pandas']);
+});
+
+test('a package asked for twice by the same origin is not reported as shared', function (): void {
+    $requirements = ProjectRequirements::collect($this->root, new SetupConfig(requirements: ['pandas>=2', 'pandas<3']));
+
+    expect($requirements->shared())->toBe([]);
+});
+
+test('install-path from installed.json is used to find a package requirements file', function (): void {
+    mkdir($this->root.'/vendor/composer', 0777, true);
+    mkdir($this->root.'/packages/nlp', 0777, true);
+    file_put_contents($this->root.'/packages/nlp/req.txt', "spacy\n");
+    file_put_contents($this->root.'/vendor/composer/installed.json', json_encode(['packages' => [
+        ['name' => 'acme/nlp', 'install-path' => '../../packages/nlp', 'extra' => ['pyhp' => ['requirements' => 'req.txt']]],
+    ]]));
+
+    expect(described(ProjectRequirements::collect($this->root, new SetupConfig)))->toBe(['acme/nlp: spacy']);
+});
+
+test('installed.json entries without a name or with a non-object extra are skipped', function (): void {
+    mkdir($this->root.'/vendor/composer', 0777, true);
+    file_put_contents($this->root.'/vendor/composer/installed.json', json_encode(['packages' => [
+        ['extra' => ['pyhp' => ['requirements' => ['nameless']]]],
+        ['name' => 'acme/odd', 'extra' => 'not an object'],
+        ['name' => 'acme/fine', 'extra' => ['pyhp' => ['requirements' => ['six']]]],
+    ]]));
+
+    expect(described(ProjectRequirements::collect($this->root, new SetupConfig)))->toBe(['acme/fine: six']);
+});
+
+test('the error about invalid requirements starts with the package and ends with the way out', function (): void {
+    installPackages($this->root, ['acme/broken' => ['extra' => ['pyhp' => ['requirements' => 5]]]]);
+
+    try {
+        ProjectRequirements::collect($this->root, new SetupConfig);
+        $message = '';
+    } catch (ConfigException $error) {
+        $message = $error->getMessage();
+    }
+
+    expect($message)->toStartWith('The Composer package acme/broken declares invalid Python requirements in its extra.pyhp: ')
+        ->and($message)->toEndWith('To skip them, add "acme/broken" to extra.pyhp.ignore-packages in your composer.json.');
+});
+
+test('a requirement name is read without leading spaces or extras', function (string $spec, ?string $name): void {
+    expect(Requirement::rawName($spec))->toBe($name);
+})->with([
+    'plain' => ['spacy', 'spacy'],
+    'leading spaces' => ['  spacy>=3', 'spacy'],
+    'extras' => ['spacy[ja]>=3.8', 'spacy'],
+    'not a name' => ['>=3', null],
+]);

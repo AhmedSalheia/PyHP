@@ -20,7 +20,7 @@ winget install --id=astral-sh.uv -e                     :: Windows
 curl -LsSf https://astral.sh/uv/install.sh | sh          # Linux / macOS
 ```
 
-**Without uv**, setup uses the Python already installed: the `py` launcher on Windows (`py -3.12`), or `python3.12` / `python3` / `python` elsewhere, then `python -m venv` and `pip`. It needs Python 3.10 or newer; if the requested version isn't installed, it uses another 3.10+ version and says so.
+**Without uv**, setup uses the Python already installed: the `py` launcher on Windows (`py -3.12`), or `python3.12` / `python3` / `python` elsewhere, then `python -m venv` and `pip`. It needs Python 3.11 or newer; if the requested version isn't installed, it uses another 3.11+ version and says so.
 
 Settings, all optional, under `extra.pyhp` in `composer.json`:
 
@@ -155,7 +155,67 @@ Problems:
 
 It exits with code 0 when everything looks fine and 1 when it found problems, so CI and deploy scripts can run it as a check.
 
-`info` reports what PyHP picks **when your code doesn't choose**. If your application sets the `python` option (`Py::config(['python' => ...])`), that interpreter is used instead. `Config::locatePython()` returns the same answer as `info` from PHP code: the interpreter, the reason (`PythonSource`) and the venv folder.
+`info` reports what PyHP picks **when your code doesn't choose**. If your application sets the `python` option (`Py::config(['python' => ...])`), that interpreter is used instead. `Config::detectPython()` returns the same interpreter from PHP code.
+
+### `pyhp info --json`
+
+The same facts as one JSON document, for scripts, CI and support tools. The exit code is the same as without `--json`.
+
+```json
+{
+    "format": 1,
+    "ok": false,
+    "pyhp": {"version": "v1.0.0"},
+    "php": {"version": "8.5.1", "sapi": "cli", "zts": false, "bits": 64, "binary": "/usr/bin/php", "os": "Linux", "os_release": "6.8.0", "machine": "x86_64", "ini": "/etc/php/8.5/cli/php.ini", "proc_open": true},
+    "project": {
+        "root": "/var/www/app",
+        "python": "3.12",
+        "requirements_file": null,
+        "requirements": [{"spec": "pandas>=2", "origin": "your project"}, {"spec": "spacy>=3.8", "origin": "acme/nlp"}],
+        "ignored": [],
+        "overrides": [],
+        "lock": {"file": "pyhp.lock", "status": "up_to_date", "packages": 42}
+    },
+    "python": {
+        "interpreter": "/var/www/app/.venv/bin/python",
+        "chosen_by": "venv",
+        "venv": {"path": "/var/www/app/.venv", "exists": true},
+        "uv": {"path": "/usr/local/bin/uv", "version": "uv 0.9.5"},
+        "started": true,
+        "version": "3.12.7",
+        "implementation": "CPython",
+        "executable": "/var/www/app/.venv/bin/python",
+        "packages": {"pandas": "3.1.1", "spacy": null},
+        "worker": {"ok": true, "error": null, "ms": 85}
+    },
+    "problems": ["Not installed: spacy. Run: vendor/bin/pyhp setup"]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `format` | Version of this document. Within a version, fields are only ever **added**; a field changing meaning or disappearing means a new `format`, in a major release of PyHP. |
+| `ok` | `true` when `problems` is empty (exit code 0). |
+| `project.requirements_file` | `{"path", "exists"}` when the requirements come from a file, otherwise `null`. |
+| `project.requirements` | Every requirement, with `origin` either `your project` or the Composer package that declared it. |
+| `project.lock.status` | `none` (no `pyhp.lock`; `file` is `null`), `up_to_date` or `out_of_date`. |
+| `python.chosen_by` | `environment` (`PYHP_PYTHON`), `venv` (the project's virtual environment) or `default` (the platform's `python3`/`python`). |
+| `python.venv` | Where the project's venv is expected (`exists` says whether it's there yet); `null` outside a Composer project. |
+| `python.uv` | `null` when uv isn't installed; `version` is `null` if it didn't answer. |
+| `python.started` | `false` when the interpreter couldn't run; then `version`, `implementation`, `executable`, `packages` and `worker` are absent. |
+| `python.packages` | Each required distribution name and its installed version, or `null` when it's missing. |
+| `python.worker` | The live worker test: `ok`, the `error` message when it failed, and how long it took in `ms`. |
+| `problems` | The same messages the text output lists under "Problems". The wording can change; check `ok` and the fields above in scripts. |
+
+## Exit codes
+
+Every command exits with:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success (for `info`: everything looks fine). |
+| `1` | The command failed, or `info` found problems. |
+| `2` | Wrong usage: an unknown command or option, or a missing or invalid option value. Nothing was run. |
 
 ---
 

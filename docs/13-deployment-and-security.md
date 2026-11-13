@@ -15,7 +15,7 @@
 
 Queue workers, daemons and app servers (Laravel Octane, RoadRunner, FrankenPHP) keep one PHP process alive for many jobs. That's where PyHP is fastest, because Python, its imports and loaded models stay warm, but a crash or timeout on job 500 must not break every job after it.
 
-**`Py::shared()`** gives one session per name for the whole process, built for exactly this:
+**`Py::shared($name)`** gives one session per name for the whole process, built for exactly this:
 
 ```php
 use PyHP\Py;
@@ -30,7 +30,7 @@ $nlp->vars->text = $job->text;                                    // pass job da
 $entities = $nlp->eval('[(e.text, e.label_) for e in nlp(text).ents]');
 ```
 
-* It's created with the **`restart`** option on: if the worker crashes or a call times out, that call throws (as always), and the **next** call starts a fresh worker and runs `setup` again before continuing.
+* It's created with the **`auto_restart`** option on: if the worker crashes or a call times out, that call throws (as always), and the **next** call starts a fresh worker and runs `setup` again before continuing.
 * `setup` is an **`onStart` hook**: it runs now and after every restart. Put everything the session needs there (imports, models, configuration), never only in the first job.
 * Values and proxies from before a restart are gone. Using an old proxy throws `StaleProxyException`; get the object again instead of keeping proxies across jobs.
 * `Py::closeShared('nlp')` closes one shared session (or all of them, without a name), for example when the worker shuts down.
@@ -39,7 +39,7 @@ $entities = $nlp->eval('[(e.text, e.label_) for e in nlp(text).ents]');
 The same pieces work on any session:
 
 ```php
-$py = Py::session(['restart' => true, 'timeout' => 30]);
+$py = Py::session(['auto_restart' => true, 'timeout' => 30]);
 $py->onStart(fn (Session $py) => $py->import('pandas', as: 'pd'));
 
 $py->ping();      // true when the worker answers (restarting it first if needed): a cheap health check
@@ -47,6 +47,36 @@ $py->restart();   // start over on purpose, e.g. between jobs that must not shar
 ```
 
 Shared sessions **share Python state between jobs**: a variable one job sets is visible to the next. Keep job data in local PHP variables and pass it in, or call `restart()` between jobs that must be isolated.
+
+## Docker
+
+`ghcr.io/pyhp-php/pyhp` is a base image for PHP apps that use PyHP: the official PHP 8.5 image (Debian 13) plus Python 3.13 with `venv` and `pip`, uv and Composer, for `linux/amd64` and `linux/arm64`. PyHP itself isn't in the image; it stays a normal Composer dependency of your app, so the image never pins your PyHP version.
+
+| Tag | For |
+|---|---|
+| `php8.5-cli`, `cli`, `latest` | Scripts, cron jobs, queue workers, long-running servers (Octane, RoadRunner, FrankenPHP workers) |
+| `php8.5-fpm`, `fpm` | Classic web apps: PHP-FPM behind nginx or another web server |
+
+A typical app image:
+
+```dockerfile
+FROM ghcr.io/pyhp-php/pyhp:php8.5-cli
+WORKDIR /app
+
+# Dependencies first, so Docker caches them until composer.json or pyhp.lock change.
+COPY composer.json composer.lock pyhp.lock* ./
+RUN composer install --no-dev --no-interaction --no-scripts \
+    && vendor/bin/pyhp setup
+
+COPY . .
+RUN composer dump-autoload --optimize --no-dev
+CMD ["php", "worker.php"]
+```
+
+* `pyhp setup` creates `/app/.venv`, and sessions find it by themselves. With a `pyhp.lock` it installs exactly the locked versions, so every build gets the same Python packages.
+* uv uses the image's Python 3.13 when it satisfies `extra.pyhp.python`, and downloads the version you asked for otherwise.
+* With the `fpm` variant, PHP runs as `www-data`. The venv is readable by everyone, so that works as it is; if your Python code writes files, give `www-data` a folder it can write to.
+* The image is rebuilt every week to pick up security updates of the PHP and Debian base images. Pull it again (or rebuild with `--pull`) to get them.
 
 ## Security
 
@@ -62,19 +92,26 @@ Shared sessions **share Python state between jobs**: a variable one job sets is 
   $py->functions->process($_GET['name']);
   ```
 
-* The worker listens on `127.0.0.1` only (never on the network), on a random port, and only until PHP has connected; then it closes the listener. The first message on a connection must contain a random 128-bit token that only the PHP process that started the worker knows. Any other connection is dropped without a reply, and a worker that nobody connects to within `startup_timeout` exits. Local processes running as **your own user** could still inspect the worker (environment variables, memory), as with any process.
+* **Names are code too.** Never let user input choose *which* Python thing runs: function, class, module, attribute or method names, or the file given to `execFile()`. `$py->functions->{$_GET['fn']}($_GET['arg'])` lets a visitor call `eval` or `exec`; `$obj->{$_GET['attr']}` can reach `__class__` and from there almost anything. If users pick an action, map their choice to a fixed list in PHP first.
+* **Only Python's own paths and the `paths` option are importable.** The working directory (`cwd`) and the worker's folder are *not* on `sys.path`, so a file someone manages to drop there (`random.py`, `json.py`, ...) can't take over an import. Put your own modules in a folder that only you can write to, and add it with `paths`.
+* **Don't show Python errors to visitors.** `PythonException` messages and tracebacks can contain values and file paths. Log them, and show visitors a generic error.
+
+* The worker listens on `127.0.0.1` only (never on the network), on a random port, and only until PHP has connected; then it closes the listener. On Windows the port is bound exclusively, so no other process can share it. The first message on a connection must contain a random 128-bit token that only the PHP process that started the worker knows, within 2 seconds. Any other connection is dropped without a reply, and a worker that nobody connects to within `startup_timeout` exits. The worker's answer repeats the token, so PHP knows it reached the worker it started. Local processes running as **your own user** could still inspect the worker (environment variables, memory), as with any process.
 * The token and PyHP's own variables (`PYHP_*`) are removed from `os.environ` before your code runs.
-* PyHP never logs your code, arguments, or variables. The worker log contains only what Python writes to stderr.
+* PyHP never logs your code, arguments, or variables. The worker log contains only what Python writes to stderr (warnings, and tracebacks of crashes). Without the `log_file` option it's a temporary file only your user can read, deleted when the session closes; if you set `log_file`, keep it out of your web root.
+* The worker's port is passed back through a temporary file only your user can read and write, deleted as soon as PHP has connected.
 
 ## Platform support
 
 | Platform | Status |
 |---|---|
-| **Linux** | ✅ Tested in CI: PHP 8.2 and 8.4, Python 3.10 and 3.13, with pandas, NumPy, SymPy and spaCy. |
-| **Windows** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). It uses sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, and passes `SYSTEMROOT` through. |
-| **macOS** | ✅ Tested in CI (PHP 8.2 and 8.4, Python 3.10 and 3.13, pandas and NumPy). |
+| **Linux** | ✅ Tested in CI: PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, with pandas, NumPy, SymPy and spaCy. |
+| **Windows** | ✅ Tested in CI (PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, pandas and NumPy). It uses sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, and passes `SYSTEMROOT` through. |
+| **macOS** | ✅ Tested in CI on Apple Silicon (PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, pandas and NumPy). |
+| **Linux on ARM** (Graviton, Ampere, Raspberry Pi) | ✅ Tested in CI on 64-bit ARM, the same versions as x64 Linux, including `pyhp setup` with uv and pip. |
+| **Windows on ARM** | ⚠️ Tested in CI, but not yet a required check. PHP has no native ARM64 build for Windows, so it runs as x64 under Windows' emulation, next to a native ARM64 Python; PyHP only talks to Python over a socket, so the mix works. |
 | **32-bit PHP** | ❌ Not supported (PHP integers must be 64-bit). |
-| **Python < 3.10** | ❌ The worker fails at start-up with a clear `WorkerStartException`. |
+| **Python < 3.11** | ❌ The worker stops at start-up and PHP throws `WorkerStartException` saying which version is needed. |
 
 Process trees: when a worker is killed (timeout, `close()` after the grace period), **child processes your Python code started are not killed**, on any platform.
 

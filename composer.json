@@ -53,6 +53,10 @@
             "phpstan analyse",
             "@putenv XDEBUG_MODE=coverage",
             "pest --coverage --min=80"
+        ],
+        "mutate": [
+            "@putenv XDEBUG_MODE=coverage",
+            "pest --mutate --everything --parallel"
         ]
     },
     "extra": {

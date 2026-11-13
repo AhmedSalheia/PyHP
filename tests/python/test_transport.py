@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import socket
 import struct
 import subprocess
@@ -14,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
+from pyhp_worker import AUTH_TIMEOUT, listen
 
 WORKER = Path(__file__).resolve().parents[2] / "python" / "pyhp_worker.py"
 HEADER = struct.Struct(">I")
@@ -51,7 +54,11 @@ def frame(message: dict[str, object]) -> bytes:
 
 
 def launch(
-    tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000, startup_timeout: float = 10
+    tmp_path: Path,
+    token: str = TOKEN,
+    max_frame: int = 1_000_000,
+    startup_timeout: float = 10,
+    cwd: Path | None = None,
 ) -> tuple[subprocess.Popen[bytes], int, Path]:
     """Start the worker; return the process, the port it listens on, and its log."""
     port_file = tmp_path / "port"
@@ -71,6 +78,7 @@ def launch(
             stdout=log_file,
             stderr=log_file,
             env=env,
+            cwd=cwd,
         )
     deadline = time.monotonic() + 10
     while not port_file.read_text().endswith("\n"):
@@ -80,8 +88,10 @@ def launch(
     return process, int(port_file.read_text()), log
 
 
-def start_worker(tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000) -> Connection:
-    process, port, log = launch(tmp_path, token, max_frame)
+def start_worker(
+    tmp_path: Path, token: str = TOKEN, max_frame: int = 1_000_000, cwd: Path | None = None
+) -> Connection:
+    process, port, log = launch(tmp_path, token, max_frame, cwd=cwd)
     sock = socket.create_connection(("127.0.0.1", port), timeout=10)
     sock.sendall(frame({"op": "auth", "token": token}))
     return Connection(sock, process, log)
@@ -99,7 +109,7 @@ def test_worker_sends_hello_with_token_first(worker: Connection) -> None:
     hello = worker.receive()
     assert hello["op"] == "hello"
     assert hello["token"] == TOKEN
-    assert hello["protocol"] == 3
+    assert hello["protocol"] == 4
 
 
 def test_worker_answers_requests_and_keeps_state(worker: Connection) -> None:
@@ -201,6 +211,8 @@ def test_extra_paths_are_added_to_sys_path(tmp_path: Path, monkeypatch: pytest.M
     connection.receive()
     connection.send({"op": "eval", "expr": "__import__('pyhp_extra_module').VALUE"})
     assert connection.receive()["value"] == 7
+    connection.send({"op": "eval", "expr": "__import__('sys').path[0]"})
+    assert connection.receive()["value"] == str(library)  # before Python's own paths
     connection.sock.close()
     connection.process.wait(timeout=10)
 
@@ -271,3 +283,68 @@ def test_oversized_callback_arguments_are_refused(tmp_path: Path) -> None:
     assert error["kind"] == "conversion"
     connection.sock.close()
     connection.process.wait(timeout=10)
+
+
+def test_the_working_directory_is_not_importable(tmp_path: Path) -> None:
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    (workdir / "pyhp_cwd_probe.py").write_text("VALUE = 1\n", encoding="utf-8")
+    connection = start_worker(tmp_path, cwd=workdir)
+    connection.receive()
+    connection.send(
+        {"op": "eval", "expr": "__import__('importlib.util').util.find_spec('pyhp_cwd_probe')"}
+    )
+    assert connection.receive()["value"] is None
+    connection.send(
+        {
+            "op": "eval",
+            "expr": (
+                "[p for p in __import__('sys').path if p in ('', '.') "
+                "or __import__('os').path.realpath(p) in "
+                "(__import__('os').path.realpath(__import__('os').getcwd()), "
+                + repr(os.path.realpath(WORKER.parent))
+                + ")]"
+            ),
+        }
+    )
+    assert connection.receive()["value"] == []
+    connection.sock.close()
+    connection.process.wait(timeout=10)
+
+
+def test_a_silent_connection_is_dropped_quickly(tmp_path: Path) -> None:
+    process, port, _ = launch(tmp_path)
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as silent:
+        started = time.monotonic()
+        assert silent.recv(1) == b""  # dropped without a word
+        assert time.monotonic() - started < AUTH_TIMEOUT + 1
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as real:
+        real.sendall(frame({"op": "auth", "token": TOKEN}))
+        connection = Connection(real, process, tmp_path / "worker.log")
+        assert connection.receive()["op"] == "hello"
+    process.wait(timeout=10)
+
+
+def test_the_listener_is_loopback_only_and_exclusive() -> None:
+    with listen() as server:
+        assert server.getsockname()[0] == "127.0.0.1"
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:  # Windows: no other process may bind the same port
+            assert server.getsockopt(socket.SOL_SOCKET, exclusive) != 0
+
+
+def test_unauthenticated_clients_wait_at_most_two_seconds() -> None:
+    assert AUTH_TIMEOUT == 2.0
+
+
+def test_hello_reports_the_python_version(worker: Connection) -> None:
+    assert worker.receive()["python"] == platform.python_version()
+
+
+def test_writes_to_file_descriptor_1_go_to_the_log(worker: Connection) -> None:
+    worker.receive()
+    worker.send({"op": "exec", "code": "import os\nos.write(1, b'written-to-fd-1\\n')"})
+    assert worker.receive()["ok"] is True
+    worker.sock.close()
+    worker.process.wait(timeout=10)
+    assert "written-to-fd-1" in worker.log.read_text()

@@ -1,0 +1,149 @@
+PyHP\Classes: final class
+PyHP\Classes::__call(string $name, array $arguments): mixed
+PyHP\Classes::__get(string $name): PyHP\PyObject
+PyHP\Classes::__isset(string $name): bool
+PyHP\Classes::__set(string $name, mixed $value): never
+PyHP\Classes::names(): array
+PyHP\Config: final readonly class
+PyHP\Config::$autoRestart: readonly bool
+PyHP\Config::$cwd: readonly ?string
+PyHP\Config::$env: readonly array
+PyHP\Config::$inheritEnv: readonly bool
+PyHP\Config::$iterBatchSize: readonly int
+PyHP\Config::$logFile: readonly ?string
+PyHP\Config::$maxMessageBytes: readonly int
+PyHP\Config::$output: readonly PyHP\OutputMode
+PyHP\Config::$paths: readonly array
+PyHP\Config::$python: readonly string
+PyHP\Config::$startupTimeout: readonly float
+PyHP\Config::$timeout: readonly ?float
+PyHP\Config::DEFAULT_ITER_BATCH_SIZE const
+PyHP\Config::DEFAULT_MAX_MESSAGE_BYTES const
+PyHP\Config::DEFAULT_STARTUP_TIMEOUT const
+PyHP\Config::DEFAULT_TIMEOUT const
+PyHP\Config::MIN_MESSAGE_BYTES const
+PyHP\Config::__construct(?string $python = null, ?float $timeout = self::DEFAULT_TIMEOUT, float $startupTimeout = self::DEFAULT_STARTUP_TIMEOUT, ?string $cwd = null, array $env = [], bool $inheritEnv = true, array $paths = [], PyHP\OutputMode $output = PyHP\OutputMode::Echo, int $maxMessageBytes = self::DEFAULT_MAX_MESSAGE_BYTES, ?string $logFile = null, int $iterBatchSize = self::DEFAULT_ITER_BATCH_SIZE, bool $autoRestart = false)
+PyHP\Config::static defaultPython(): string
+PyHP\Config::static detectPython(?string $projectRoot = null): string
+PyHP\Config::static fromArray(array $options): self
+PyHP\Config::with(array $options): self
+PyHP\Exception\ConfigException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\ConversionException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\MessageTooLargeException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\ProtocolException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\PyHPException: class extends RuntimeException implements Stringable, Throwable
+PyHP\Exception\PythonException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\PythonException::$pythonMessage: readonly string
+PyHP\Exception\PythonException::$pythonTraceback: readonly string
+PyHP\Exception\PythonException::$pythonType: readonly string
+PyHP\Exception\PythonException::__construct(string $pythonType, string $pythonMessage, string $pythonTraceback)
+PyHP\Exception\SessionClosedException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\StaleProxyException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\TimeoutException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\WorkerCrashedException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Exception\WorkerStartException: final class extends PyHP\Exception\PyHPException implements Stringable, Throwable
+PyHP\Functions: final class
+PyHP\Functions::__call(string $name, array $arguments): mixed
+PyHP\Functions::__get(string $name): PyHP\PyObject
+PyHP\Functions::__isset(string $name): bool
+PyHP\Modules: final class
+PyHP\Modules::__get(string $name): PyHP\PyObject
+PyHP\Modules::__isset(string $name): bool
+PyHP\Modules::__set(string $name, mixed $value): never
+PyHP\Modules::names(): array
+PyHP\OutputMode: enum
+PyHP\OutputMode::Capture case
+PyHP\OutputMode::Echo case
+PyHP\Py: final class
+PyHP\Py::static classes(): PyHP\Classes
+PyHP\Py::static closeShared(?string $name = null): void
+PyHP\Py::static columns(PyHP\PyObject $frame): array
+PyHP\Py::static config(array $options): void
+PyHP\Py::static configuration(): PyHP\Config
+PyHP\Py::static default(): PyHP\Session
+PyHP\Py::static dict(array $items): PyHP\Value\Dict
+PyHP\Py::static eval(string $expression): mixed
+PyHP\Py::static exec(string $code): void
+PyHP\Py::static execFile(string $path): void
+PyHP\Py::static functions(): PyHP\Functions
+PyHP\Py::static import(string $module, ?string $as = null, ?string $from = null): mixed
+PyHP\Py::static len(PyHP\PyObject $object): int
+PyHP\Py::static modules(): PyHP\Modules
+PyHP\Py::static ndarray(array $data, string $dtype = 'float64'): PyHP\Value\NdArray
+PyHP\Py::static ref(PyHP\PyObject $object, string $attribute): PyHP\PyObject
+PyHP\Py::static repr(PyHP\PyObject $object): string
+PyHP\Py::static reset(bool $forgetConfig = false): void
+PyHP\Py::static rows(PyHP\PyObject $frame): array
+PyHP\Py::static session(array $overrides = []): PyHP\Session
+PyHP\Py::static shared(string $name, ?Closure $setup = null, array $overrides = []): PyHP\Session
+PyHP\Py::static slice(?int $start, ?int $stop = null, ?int $step = null): PyHP\Value\Slice
+PyHP\Py::static toPhp(PyHP\PyObject $object): mixed
+PyHP\Py::static tuple(mixed ...$items): PyHP\Value\Tuple
+PyHP\Py::static type(PyHP\PyObject $object): string
+PyHP\Py::static vars(): PyHP\Vars
+PyHP\Py::static vectorize(Closure $callback, bool $elementwise = false, int $batchSize = 1000): PyHP\Value\Vectorized
+PyHP\PyObject: final class implements ArrayAccess, IteratorAggregate, Stringable, Traversable
+PyHP\PyObject::__call(string $name, array $arguments): mixed
+PyHP\PyObject::__clone(): void
+PyHP\PyObject::__debugInfo(): array
+PyHP\PyObject::__destruct()
+PyHP\PyObject::__get(string $name): mixed
+PyHP\PyObject::__invoke(mixed ...$arguments): mixed
+PyHP\PyObject::__isset(string $name): bool
+PyHP\PyObject::__serialize(): array
+PyHP\PyObject::__set(string $name, mixed $value): void
+PyHP\PyObject::__toString(): string
+PyHP\PyObject::__unserialize(array $data): void
+PyHP\PyObject::__unset(string $name): void
+PyHP\PyObject::getIterator(): Generator
+PyHP\PyObject::offsetExists(mixed $offset): bool
+PyHP\PyObject::offsetGet(mixed $offset): mixed
+PyHP\PyObject::offsetSet(mixed $offset, mixed $value): void
+PyHP\PyObject::offsetUnset(mixed $offset): void
+PyHP\Session: final class
+PyHP\Session::$classes: readonly PyHP\Classes
+PyHP\Session::$functions: readonly PyHP\Functions
+PyHP\Session::$modules: readonly PyHP\Modules
+PyHP\Session::$vars: readonly PyHP\Vars
+PyHP\Session::__construct(PyHP\Config $config = new PyHP\Config)
+PyHP\Session::__destruct()
+PyHP\Session::close(): void
+PyHP\Session::configuration(): PyHP\Config
+PyHP\Session::eval(string $expression): mixed
+PyHP\Session::exec(string $code): void
+PyHP\Session::execFile(string $path): void
+PyHP\Session::import(string $module, ?string $as = null, ?string $from = null): mixed
+PyHP\Session::info(): array
+PyHP\Session::isOpen(): bool
+PyHP\Session::log(): string
+PyHP\Session::onOutput(?Closure $handler): self
+PyHP\Session::onStart(Closure $hook): self
+PyHP\Session::ping(): bool
+PyHP\Session::restart(): void
+PyHP\Session::takeOutput(): string
+PyHP\Value\Dict: final readonly class
+PyHP\Value\Dict::$items: readonly array
+PyHP\Value\Dict::__construct(array $items)
+PyHP\Value\NdArray: final readonly class
+PyHP\Value\NdArray::$data: readonly array
+PyHP\Value\NdArray::$dtype: readonly string
+PyHP\Value\NdArray::DTYPES const
+PyHP\Value\NdArray::__construct(array $data, string $dtype = 'float64')
+PyHP\Value\Slice: final readonly class
+PyHP\Value\Slice::$start: readonly ?int
+PyHP\Value\Slice::$step: readonly ?int
+PyHP\Value\Slice::$stop: readonly ?int
+PyHP\Value\Slice::__construct(?int $start = null, ?int $stop = null, ?int $step = null)
+PyHP\Value\Tuple: final readonly class
+PyHP\Value\Tuple::$items: readonly array
+PyHP\Value\Tuple::__construct(mixed ...$items)
+PyHP\Value\Vectorized: final readonly class
+PyHP\Value\Vectorized::$batchSize: readonly int
+PyHP\Value\Vectorized::__construct(Closure $callback, bool $elementwise = false, int $batchSize = 1000)
+PyHP\Vars: final class
+PyHP\Vars::__get(string $name): mixed
+PyHP\Vars::__isset(string $name): bool
+PyHP\Vars::__set(string $name, mixed $value): void
+PyHP\Vars::__unset(string $name): void
+PyHP\Vars::names(): array
+PyHP\Vars::ref(string $name): PyHP\PyObject

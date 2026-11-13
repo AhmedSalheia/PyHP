@@ -65,6 +65,17 @@ test('unknown options are rejected with the list of valid ones', function (): vo
         ->toThrow(ConfigException::class, 'Unknown PyHP option "pyhton"');
 });
 
+test('auto_restart is off by default and set by its option or constructor argument', function (): void {
+    expect((new Config)->autoRestart)->toBeFalse()
+        ->and(Config::fromArray(['auto_restart' => true])->autoRestart)->toBeTrue()
+        ->and((new Config(autoRestart: true))->autoRestart)->toBeTrue();
+});
+
+test('the restart option from 0.4 is refused with its new name', function (): void {
+    expect(fn () => Config::fromArray(['restart' => true]))
+        ->toThrow(ConfigException::class, 'renamed to "auto_restart"');
+});
+
 test('invalid option values are rejected', function (array $options, string $message): void {
     expect(fn () => Config::fromArray($options))->toThrow(ConfigException::class, $message);
 })->with([
@@ -77,7 +88,7 @@ test('invalid option values are rejected', function (array $options, string $mes
     'non-string path' => [['paths' => [1]], 'paths'],
     'zero batch size' => [['iter_batch_size' => 0], 'iter_batch_size'],
     'wrong type' => [['timeout' => 'soon'], 'timeout'],
-    'restart not a bool' => [['restart' => 'yes'], 'restart'],
+    'auto_restart not a bool' => [['auto_restart' => 'yes'], 'auto_restart'],
 ]);
 
 test('the platform default interpreter is python on Windows and python3 elsewhere', function (): void {

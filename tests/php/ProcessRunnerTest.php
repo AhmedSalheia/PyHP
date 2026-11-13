@@ -72,3 +72,14 @@ test('on Windows find tries the PATHEXT extensions and skips files without one',
         ->and($runner->find('uv.exe'))->toBe($this->dir.DIRECTORY_SEPARATOR.'uv.exe')
         ->and($runner->find('uv.bat'))->toBeNull();
 });
+
+test('find joins a PATH folder that ends with a separator without doubling it', function (): void {
+    $windows = PHP_OS_FAMILY === 'Windows';
+    $file = $this->dir.DIRECTORY_SEPARATOR.($windows ? 'fakeprog.bat' : 'fakeprog');
+    file_put_contents($file, $windows ? "@echo off\r\n" : "#!/bin/sh\n");
+    chmod($file, 0755);
+
+    $runner = new ProcessRunner(path: $this->dir.DIRECTORY_SEPARATOR, pathExt: '.EXE;.BAT');
+
+    expect($runner->find('fakeprog'))->toBe($file);
+});

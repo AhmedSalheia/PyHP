@@ -7,6 +7,8 @@ namespace PyHP\Setup;
 /**
  * Runs external programs for `pyhp setup`. An interface because it is the
  * boundary to the operating system, so the installer's tests can fake it.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
 interface CommandRunner
 {

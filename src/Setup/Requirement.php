@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace PyHP\Setup;
 
-/** One Python requirement in pip syntax ("pandas>=2") and who asked for it. */
+/**
+ * One Python requirement in pip syntax ("pandas>=2") and who asked for it.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
+ */
 final readonly class Requirement
 {
     /** The distribution name in its normalized form (PEP 503): "Scikit_Learn" -> "scikit-learn". */

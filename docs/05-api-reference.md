@@ -11,18 +11,19 @@
 | `Py::session(array $overrides = []): Session` | A new independent session. `$overrides` apply to this session only. |
 | `Py::default(): Session` | A shared default session, started on first use and restarted automatically if it was closed. |
 | `Py::reset(bool $forgetConfig = false)` | Close the default session. With `forgetConfig: true` also go back to default options. |
-| `Py::shared(string $name = 'default', ?Closure $setup = null, array $overrides = []): Session` | One long-lived session per name for this PHP process, with `restart` on and `$setup` as its `onStart` hook. Later calls return the same session. See [Long-running PHP](13-deployment-and-security.md#long-running-php-recovery-and-shared-sessions). |
+| `Py::shared(string $name, ?Closure $setup = null, array $overrides = []): Session` | One long-lived session per name for this PHP process, with `auto_restart` on and `$setup` as its `onStart` hook. Later calls return the same session. See [Long-running PHP](13-deployment-and-security.md#long-running-php-recovery-and-shared-sessions). |
 | `Py::closeShared(?string $name = null)` | Close and forget one shared session, or all of them. |
 | `Py::exec()`, `Py::execFile()`, `Py::eval()`, `Py::import()`, `Py::vars()`, `Py::functions()`, `Py::modules()`, `Py::classes()` | Shortcuts to the same methods on `Py::default()`. |
 | `Py::tuple(...$items)` | A value sent as a Python `tuple`. |
 | `Py::slice($start, $stop = null, $step = null)` | A value sent as a Python `slice`: `Py::slice(1, 3)` is `1:3`, `Py::slice(null, null, -1)` is `::-1`. |
 | `Py::vectorize(Closure $callback, bool $elementwise = false, int $batchSize = 1000): Vectorized` | A PHP closure Python calls once per batch of values instead of once per value; use it with `->pipe()`. pandas Series keep their index and name. See [Speed](09-php-callbacks.md#pyvectorize-php-logic-a-round-trip-per-batch). |
 | `Py::dict(array $items)` | A value sent as a Python `dict`, even if the array is empty or list-shaped. |
+| `Py::ndarray(array $data, string $dtype = 'float64'): NdArray` | A value sent as a NumPy array, packed as raw bytes: much faster than JSON for big arrays. See [NumPy arrays](08-pandas-and-numpy.md#numpy-arrays). |
 | `Py::len(PyObject $o): int` | Python `len(o)`. |
 | `Py::repr(PyObject $o): string` | Python `repr(o)`. |
 | `Py::type(PyObject $o): string` | The Python type, e.g. `pandas.DataFrame`, `int`, `__pyhp__.Invoice`. |
 | `Py::ref(PyObject $o, string $attribute): PyObject` | A live proxy to an attribute instead of a copy, so you can change it in place: `Py::ref($doc, 'user_data')['k'] = 'v'`. |
-| `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets and subclasses of dict/list/str/int/float. Throws instead of returning nested proxies. |
+| `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets, subclasses of dict/list/str/int/float and NumPy arrays (copied as raw bytes). Throws instead of returning nested proxies. |
 | `Py::rows(PyObject $df): array` | A pandas DataFrame as a list of rows, fast and `json_encode()`-ready; see [Copying tables into PHP](08-pandas-and-numpy.md#copying-tables-into-php). |
 | `Py::columns(PyObject $df): array` | The same as one list per column: the most compact copy. |
 
@@ -38,14 +39,14 @@ Use these keys with `Py::config()`, `Py::session()` and `Config::fromArray()`. U
 | `timeout` | float\|null | `30` | Seconds **one call** may take. `null` = wait forever. On timeout the worker is killed (see [Errors](11-output-and-errors.md#errors)). |
 | `startup_timeout` | float | `10` | Seconds to wait for the worker to start and connect. |
 | `cwd` | string\|null | `null` (PHP's) | Working directory of the Python process. Relative paths *inside Python* resolve against it. |
-| `env` | array<string,string> | `[]` | Extra environment variables for Python. |
+| `env` | `array<string,string>` | `[]` | Extra environment variables for Python. |
 | `inherit_env` | bool | `true` | Start from PHP's environment (`true`) or from only `env` (`false`). On Windows `SYSTEMROOT` is always passed, because Python needs it. |
-| `paths` | list<string> | `[]` | Extra folders added to Python's `sys.path`, so your own modules can be imported. |
+| `paths` | `list<string>` | `[]` | Extra folders added to Python's `sys.path`, so your own modules can be imported. The working directory isn't importable by default; add it here if you need it. |
 | `output` | `OutputMode` or `'echo'`/`'capture'` | `Echo` | What happens to text Python prints. See [Printed output](11-output-and-errors.md#printed-output-and-the-log). |
 | `max_message_bytes` | int | 64 MiB | Largest request or result allowed. Protects PHP from accidentally copying huge data. Minimum 1024. |
 | `log_file` | string\|null | `null` (temp file) | Where the worker's stderr goes. A temp file is deleted when the session closes; set a path to keep it. |
 | `iter_batch_size` | int | `100` | Items fetched per round trip in `foreach`. |
-| `restart` | bool | `false` | After a crash or timeout, start a fresh worker on the next call and run the `onStart` hooks, instead of leaving the session closed. |
+| `auto_restart` | bool | `false` | After a crash or timeout, start a fresh worker on the next call and run the `onStart` hooks, instead of leaving the session closed. |
 
 Precedence: built-in defaults → `Py::config()` → `Py::session([...])` overrides.
 
@@ -67,12 +68,12 @@ You can also build a `Config` directly with named arguments: `new Session(new Co
 | `onOutput(?Closure $handler): self` | Send printed output to `$handler(string $text)` live while calls run, instead of echoing or capturing it; `null` goes back to the output mode. See [Printed output](11-output-and-errors.md#printed-output-and-the-log). |
 | `log(): string` | Everything the worker wrote to stderr so far (warnings, crash output). |
 | `info(): array` | `protocol`, `python` (version), `executable`, `objects` (live proxies), `callbacks` (PHP closures Python holds), `pid`. |
-| `isOpen(): bool` | Whether the worker is running. |
-| `ping(): bool` | Whether the worker answers a request (restarting it first when `restart` is on). |
+| `isOpen(): bool` | Whether the worker is running right now. After a crash or timeout it's `false` even with `auto_restart` on, although the next call would start a fresh worker; use `ping()` to check and restart in one step. |
+| `ping(): bool` | Whether the worker answers a request (restarting it first when `auto_restart` is on). |
 | `onStart(Closure $hook): self` | Runs `$hook($session)` now and after every restart: put imports, models and variables the session needs here. |
 | `restart(): void` | Replace the worker with a fresh one and run the `onStart` hooks. Proxies from before throw `StaleProxyException`. Not allowed inside a PHP callback. |
 | `close(): void` | Stop the worker. Safe to call twice. Also happens automatically when the session object is destroyed. |
-| `config(): Config` | The session's configuration. |
+| `configuration(): Config` | The session's configuration. |
 
 A few `Session` methods (`request()`, `codec()`, `release()`) are public for PyHP's internal use and are marked `@internal`. Don't call them; they may change without notice.
 

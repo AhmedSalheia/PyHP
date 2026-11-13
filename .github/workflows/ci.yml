@@ -8,41 +8,74 @@ on:
     branches: [develop, main]
 
 jobs:
+  # The worker on the oldest and newest supported Python, on x64 and ARM
+  # (macos-latest is Apple Silicon).
   python-worker:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.10", "3.13"]
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-24.04-arm, windows-11-arm]
+        python: ["3.11", "3.15"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install pytest pytest-cov "coverage>=7.10" mypy ruff numpy
+      - run: python -m pip install pytest pytest-cov "coverage>=7.10" mypy ruff
+      # NumPy is optional for the worker tests (they skip without it). A brand-new
+      # Python can come out before NumPy publishes wheels for it; don't fail on that.
+      - shell: bash
+        run: |
+          python -m pip install --only-binary=:all: numpy \
+            || echo "::warning::No NumPy wheel for Python ${{ matrix.python }} yet; its tests are skipped."
       - run: python -m ruff format --check python tests/python
       - run: python -m ruff check python tests/python
       - run: python -m mypy
       - run: python -m pytest --cov
 
+  # The PHP library, end to end with a real worker: the oldest supported PHP with the
+  # oldest supported Python, and the newest PHP with the newest Python the data
+  # libraries (pandas, spaCy, ...) reliably ship wheels for.
   php:
+    name: php (${{ matrix.os }}, PHP ${{ matrix.php }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        php: ["8.2", "8.4"]
+        php: ["8.2", "8.5"]
+        include:
+          - php: "8.2"
+            python: "3.11"
+          - php: "8.5"
+            python: "3.14"
+          # Linux on ARM (Graviton, Ampere, Raspberry Pi 5 class servers).
+          - os: ubuntu-24.04-arm
+            php: "8.2"
+            python: "3.11"
+          - os: ubuntu-24.04-arm
+            php: "8.5"
+            python: "3.14"
+          # Windows on ARM: PHP has no native ARM64 build for Windows, so it runs as x64
+          # under Windows' emulation next to a native Python, as it does on users'
+          # machines.
+          - os: windows-11-arm
+            php: "8.5"
+            python: "3.14"
+          # The next PHP, so a break shows up before users upgrade.
+          - os: ubuntu-latest
+            php: "8.6"
+            python: "3.14"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         id: python
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
       - run: python -m pip install pandas numpy
       - if: runner.os == 'Linux'
         run: python -m pip install -r requirements-dev.txt
-        
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
@@ -60,13 +93,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-24.04-arm]
         installer: [uv, pip]
     steps:
       - uses: actions/checkout@v6
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.5"
           coverage: none
       - if: matrix.installer == 'uv'
         uses: astral-sh/setup-uv@v10.0.1

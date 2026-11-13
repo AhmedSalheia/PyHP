@@ -17,6 +17,8 @@ use PyHP\Exception\ConfigException;
  * Without it, a requirements.txt in the project root is used if there is one.
  * Installed Composer packages can declare requirements the same way; the root
  * project can skip theirs ("ignore-packages") or force versions ("overrides", uv only).
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
 final readonly class SetupConfig
 {

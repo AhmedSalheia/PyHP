@@ -103,7 +103,7 @@ final class Session
         $this->close();
     }
 
-    public function config(): Config
+    public function configuration(): Config
     {
         return $this->config;
     }
@@ -196,7 +196,7 @@ final class Session
 
     /**
      * Registers a hook that prepares the session (imports, models, variables): it runs
-     * now, and again whenever the worker is restarted (see the "restart" option).
+     * now, and again whenever the worker is restarted (see the "auto_restart" option).
      *
      * @param  Closure(Session): mixed  $hook
      */
@@ -247,7 +247,7 @@ final class Session
         }
     }
 
-    /** True when the worker answers a ping; restarts it first if the "restart" option allows. */
+    /** True when the worker answers a ping; restarts it first if the "auto_restart" option allows. */
     public function ping(): bool
     {
         try {
@@ -289,7 +289,7 @@ final class Session
      */
     public function request(string $op, array $fields = []): mixed
     {
-        if ($this->config->restart && ! $this->closed && $this->requestDepth === 0
+        if ($this->config->autoRestart && ! $this->closed && $this->requestDepth === 0
             && ($this->worker === null || ! $this->worker->isRunning())) {
             $this->restart();
         }
@@ -303,6 +303,11 @@ final class Session
         if ($releases !== []) {
             $message['release'] = $releases;
         }
+        // Arrays in $fields (Py::ndarray()) were encoded by the caller; their data follows as binary frames.
+        $buffers = $this->codec->takeBuffers();
+        if ($buffers !== []) {
+            $message['bin'] = count($buffers);
+        }
         $json = Codec::toJson($message);
         $this->pendingReleases = [];
         $timeout = $this->config->timeout;
@@ -311,7 +316,7 @@ final class Session
         $this->requestDepth++;
         try {
             try {
-                $worker->send($json, $deadline, $timeout);
+                $worker->send($json, $buffers, $deadline, $timeout);
             } catch (MessageTooLargeException $error) {
                 // Nothing was sent, so the releases are still owed to the worker.
                 $this->pendingReleases = $releases;
@@ -334,7 +339,7 @@ final class Session
 
             // Plain results (no references, bytes or NaN/Inf anywhere) are already
             // the final PHP value: skip the decode pass and its full copy.
-            return ($response['tagged'] ?? true) === false ? $value : $this->codec->decode($value);
+            return ($response['tagged'] ?? true) === false ? $value : $this->codec->decode($value, self::buffersOf($response));
         } finally {
             $this->requestDepth--;
             if ($this->requestDepth === 0) {
@@ -375,6 +380,46 @@ final class Session
     }
 
     /**
+     * The next message from the worker, with the binary frames it announced
+     * (the data of its NumPy arrays) under "_buffers".
+     *
+     * @return array<array-key, mixed>
+     */
+    private function receiveMessage(?float $deadline, ?float $timeout): array
+    {
+        $worker = $this->runningWorker();
+        $message = Codec::fromJson($worker->receive($deadline, $timeout));
+        if (! array_key_exists('bin', $message)) {
+            return $message;
+        }
+        $count = $message['bin'];
+        if (! is_int($count) || $count < 0) {
+            $worker->kill();
+            throw new ProtocolException('The worker announced an invalid number of binary frames.');
+        }
+        $buffers = [];
+        for ($i = 0; $i < $count; $i++) {
+            $buffers[] = $worker->receive($deadline, $timeout);
+        }
+        $message['_buffers'] = $buffers;
+
+        return $message;
+    }
+
+    /**
+     * The binary frames receiveMessage() or runCallback() attached to a message.
+     *
+     * @param  array<array-key, mixed>  $message
+     * @return list<string>
+     */
+    private static function buffersOf(array $message): array
+    {
+        $buffers = $message['_buffers'] ?? [];
+
+        return is_array($buffers) ? array_values(array_filter($buffers, is_string(...))) : [];
+    }
+
+    /**
      * Read frames until the response arrives, running PHP callbacks Python asks for.
      *
      * @return array<array-key, mixed>
@@ -382,7 +427,7 @@ final class Session
     private function awaitResponse(?float $deadline, ?float $timeout): array
     {
         while (true) {
-            $frame = Codec::fromJson($this->runningWorker()->receive($deadline, $timeout));
+            $frame = $this->receiveMessage($deadline, $timeout);
             $this->forgetCallbacks($frame['release_callbacks'] ?? null);
             $op = $frame['op'] ?? null;
             if ($op === 'output') {
@@ -423,15 +468,23 @@ final class Session
         try {
             $closure = $this->callback($id);
             $tagged = ($frame['tagged'] ?? true) !== false;
-            $args = $tagged ? $this->codec->decode($frame['args'] ?? []) : ($frame['args'] ?? []);
-            $kwargs = $tagged ? $this->codec->decode($frame['kwargs'] ?? []) : ($frame['kwargs'] ?? []);
+            $buffers = self::buffersOf($frame);
+            $args = $tagged ? $this->codec->decode($frame['args'] ?? [], $buffers) : ($frame['args'] ?? []);
+            $kwargs = $tagged ? $this->codec->decode($frame['kwargs'] ?? [], $buffers) : ($frame['kwargs'] ?? []);
             if (! is_array($args) || ! array_is_list($args) || ! is_array($kwargs)) {
                 throw new ProtocolException('The worker sent invalid callback arguments.');
             }
             $value = $this->codec->encode($closure(...$args, ...$kwargs));
+            $reply = $this->withReleases(['op' => 'php_return', 'seq' => $seq, 'ok' => true, 'value' => $value]);
+            $replyBuffers = $this->codec->takeBuffers();
+            if ($replyBuffers !== []) {
+                $reply['_buffers'] = $replyBuffers;
+            }
 
-            return [$this->withReleases(['op' => 'php_return', 'seq' => $seq, 'ok' => true, 'value' => $value]), null];
+            return [$reply, null];
         } catch (Throwable $error) {
+            $this->codec->takeBuffers(); // arrays of a result that couldn't be sent
+
             // Not swallowed: it travels to Python as PhpError, and the original
             // object is rethrown here if Python doesn't catch it.
             return [$this->withReleases($this->callbackFailure($seq, $error)), $error];
@@ -448,11 +501,16 @@ final class Session
             // The callback closed the session (or a nested call killed the worker).
             throw $thrown ?? new SessionClosedException('The session was closed inside a PHP callback.');
         }
+        $buffers = self::buffersOf($reply);
+        unset($reply['_buffers']);
+        if ($buffers !== []) {
+            $reply['bin'] = count($buffers);
+        }
         try {
-            $worker->send(Codec::toJson($reply), $deadline, $timeout);
+            $worker->send(Codec::toJson($reply), $buffers, $deadline, $timeout);
         } catch (MessageTooLargeException|ConversionException $error) {
             $seq = $reply['seq'] ?? 0;
-            $worker->send(Codec::toJson($this->callbackFailure(is_int($seq) ? $seq : 0, $error)), $deadline, $timeout);
+            $worker->send(Codec::toJson($this->callbackFailure(is_int($seq) ? $seq : 0, $error)), [], $deadline, $timeout);
         }
     }
 

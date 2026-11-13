@@ -13,7 +13,13 @@ use InvalidArgumentException;
  */
 final readonly class Vectorized
 {
-    /** @var Closure(list<mixed>): array<array-key, mixed> receives a chunk, returns one value per item */
+    /**
+     * The chunk closure PyHP sends to Python: your closure, wrapped.
+     *
+     * @internal Used by PyHP's codec; may change in any release.
+     *
+     * @var Closure(list<mixed>): array<array-key, mixed> receives a chunk, returns one value per item
+     */
     public Closure $callback;
 
     /**

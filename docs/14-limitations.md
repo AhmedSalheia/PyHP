@@ -8,9 +8,9 @@
 2. One call at a time per session. Not thread-safe; don't share sessions across forks.
 3. Every proxy operation is a round trip (~0.1 ms on Linux).
 4. Sessions can't outlive their PHP process. Under PHP-FPM, every request pays start-up and import time.
-5. Timeouts kill the worker and lose all session state. Running Python calls can't be interrupted gently. With the `restart` option the next call gets a fresh worker and your `onStart` hooks rebuild the state, but the call that timed out still fails.
+5. Timeouts kill the worker and lose all session state. Running Python calls can't be interrupted gently. With the `auto_restart` option the next call gets a fresh worker and your `onStart` hooks rebuild the state, but the call that timed out still fails.
 6. Child processes started by your Python code are not killed with the worker.
-7. No automatic retry: after a crash or timeout the failed call throws; only the next call restarts the worker (`restart` option).
+7. No automatic retry: after a crash or timeout the failed call throws; only the next call restarts the worker (`auto_restart` option).
 
 **Syntax gaps**
 
@@ -30,7 +30,7 @@
 18. Python ints beyond 64 bits, sets, dates, Decimals, `pd.NA`/`NaT` and subclasses of built-ins stay proxies.
 19. PHP objects (`DateTime`, enums, DTOs) and resources can't be sent; convert them first.
 20. Non-UTF-8 PHP strings become `bytes`; Python `bytes` come back as plain strings.
-21. Everything copied goes through JSON. Large copies are slow and capped by `max_message_bytes` (64 MiB default); `Py::rows()`/`Py::columns()` are the fastest way to copy tables.
+21. Everything copied goes through JSON, except NumPy arrays copied with `Py::toPhp()` or sent with `Py::ndarray()`, which travel as raw bytes. Large copies are slow and capped by `max_message_bytes` (64 MiB default, per message and per array); `Py::rows()`/`Py::columns()` are the fastest way to copy tables.
 
 **Output and diagnostics**
 
@@ -41,7 +41,7 @@
 **Environment**
 
 25. The optional library suites (SymPy, spaCy, matplotlib, Pillow, scikit-learn) run in CI on Linux only; pandas and NumPy run on every system; other libraries aren't tested by PyHP at all (see [Platform support](13-deployment-and-security.md#platform-support)).
-26. 64-bit PHP 8.2+ and Python 3.10+ only.
+26. 64-bit PHP 8.2+ and Python 3.11+ only.
 27. Not a sandbox. Trusted code only.
 28. `multiprocessing` from session code is untested. Functions defined inside the session (rather than in importable modules) can't be pickled into child processes on Windows/macOS (`spawn`).
 

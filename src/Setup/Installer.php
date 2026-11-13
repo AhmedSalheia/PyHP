@@ -10,13 +10,15 @@ use Closure;
  * Builds a project's Python environment: a virtual environment plus the
  * packages the project needs. Uses uv when it's installed (fast, and it can
  * download any Python version), otherwise the system Python with venv and pip.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
 final class Installer
 {
     /** Prints "major.minor" of the interpreter it runs in. */
     public const VERSION_PROBE = 'import sys; print("%d.%d" % sys.version_info[:2])';
 
-    public const MIN_PYTHON = '3.10';
+    public const MIN_PYTHON = '3.11';
 
     public const UV_INSTALL_URL = 'https://docs.astral.sh/uv/getting-started/installation/';
 

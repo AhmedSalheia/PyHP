@@ -271,7 +271,7 @@ def test_ping_counts_live_callbacks() -> None:
     value = ok_value(session.handle({"op": "ping"}))
     assert isinstance(value, dict)
     assert value["callbacks"] == 1
-    assert value["protocol"] == 3
+    assert value["protocol"] == 4
 
 
 def test_a_returned_proxy_survives_its_own_release_in_the_same_reply() -> None:
@@ -287,3 +287,30 @@ def test_a_returned_proxy_survives_its_own_release_in_the_same_reply() -> None:
     session.handle({"op": "exec", "code": "def run(f):\n    return f() is o"})
 
     assert ok_value(call(session, "run", CALLBACK)) is True
+
+
+def test_the_pyhp_module_exposes_only_its_public_api() -> None:
+    error = {"class": "DomainException", "message": "nope", "id": 1}
+    session, _ = make([{"op": "php_return", "seq": 1, "ok": False, "error": error}])
+    session.handle(
+        {
+            "op": "exec",
+            "code": (
+                "import pyhp\n"
+                "def public(f):\n"
+                "    try:\n"
+                "        f()\n"
+                "    except pyhp.PhpError as e:\n"
+                "        names = [n for n in vars(e) if not n.startswith('_')]\n"
+                "    module = sorted(n for n in vars(pyhp) if not n.startswith('_'))\n"
+                "    callback = [n for n in type(f).__slots__ if not n.startswith('_')]\n"
+                "    return [sorted(names), module, callback]"
+            ),
+        }
+    )
+
+    assert ok_value(call(session, "public", CALLBACK)) == [
+        ["php_class", "php_message"],
+        ["PhpCallable", "PhpError"],
+        [],
+    ]

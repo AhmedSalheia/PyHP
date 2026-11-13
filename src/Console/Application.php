@@ -10,16 +10,27 @@ use PyHP\Setup\CommandRunner;
 use PyHP\Setup\Installer;
 use PyHP\Setup\SetupConfig;
 
-/** The `vendor/bin/pyhp` command line tool. */
+/**
+ * The `vendor/bin/pyhp` command line tool.
+ *
+ * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
+ */
 final class Application
 {
+    /** Exit code when the command failed or found problems. */
+    public const FAILURE = 1;
+
+    /** Exit code for a wrong command line: unknown command or option, missing or bad value. */
+    public const USAGE_ERROR = 2;
+
     private const USAGE = <<<'TXT'
         PyHP command line tool
 
         Usage:
           pyhp setup [options]   Create the project's Python environment and install its packages
           pyhp lock [options]    Resolve every Python requirement and write exact versions to pyhp.lock
-          pyhp info              Show PHP, Python, venv and package details for debugging
+          pyhp info [--json]     Show PHP, Python, venv and package details for debugging
+                                 (--json: the same as one JSON document, for scripts)
           pyhp help              Show this help
 
         Run it from your project's root folder (where composer.json is).
@@ -41,6 +52,8 @@ final class Application
 
         PyHP finds the environment by itself: sessions use .venv (or extra.pyhp.venv)
         unless you set the "python" option or the PYHP_PYTHON environment variable.
+
+        Exit codes: 0 success, 1 failure (or problems found by info), 2 wrong usage.
 
         TXT;
 
@@ -70,14 +83,21 @@ final class Application
             return 0;
         }
         if ($command === 'info') {
+            $json = false;
+            foreach (array_slice($args, 1) as $option) {
+                if ($option !== '--json') {
+                    return $this->usage(sprintf('Unknown option "%s" for info. Run "pyhp help" to see the options.', $option));
+                }
+                $json = true;
+            }
             try {
-                return (new InfoCommand($this->runner, $this->out, $this->workerCheck))->run($cwd);
+                return (new InfoCommand($this->runner, $this->out, $this->workerCheck))->run($cwd, $json);
             } catch (ConfigException $e) {
                 return $this->fail($e->getMessage());
             }
         }
         if ($command !== 'setup' && $command !== 'lock') {
-            return $this->fail(sprintf('Unknown command "%s". Run "pyhp help" to see the commands.', $command));
+            return $this->usage(sprintf('Unknown command "%s". Run "pyhp help" to see the commands.', $command));
         }
 
         try {
@@ -115,7 +135,7 @@ final class Application
                     break;
                 case '--exact':
                     if ($command === 'lock') {
-                        return $this->fail('Unknown option "--exact" for lock. Run "pyhp help" to see the options.');
+                        return $this->usage('Unknown option "--exact" for lock. Run "pyhp help" to see the options.');
                     }
                     $exact = true;
                     break;
@@ -126,7 +146,7 @@ final class Application
                         $i++;
                     }
                     if ($value === null || $value === '' || str_starts_with($value, '--')) {
-                        return $this->fail("{$name} needs a value, e.g. {$name}=".($name === '--python' ? '3.12' : '.venv'));
+                        return $this->usage("{$name} needs a value, e.g. {$name}=".($name === '--python' ? '3.12' : '.venv'));
                     }
                     if ($name === '--python') {
                         $python = $value;
@@ -135,11 +155,16 @@ final class Application
                     }
                     break;
                 default:
-                    return $this->fail(sprintf('Unknown option "%s" for %s. Run "pyhp help" to see the options.', $name, $command));
+                    return $this->usage(sprintf('Unknown option "%s" for %s. Run "pyhp help" to see the options.', $name, $command));
             }
         }
 
-        $config = SetupConfig::fromProject($cwd)->with(python: $python, venv: $venv);
+        $project = SetupConfig::fromProject($cwd);
+        try {
+            $config = $project->with(python: $python, venv: $venv);
+        } catch (ConfigException $e) {
+            return $this->usage($e->getMessage());
+        }
         $out = $this->out;
         $installer = new Installer($this->runner, static function (string $line) use ($out): void {
             $out($line.PHP_EOL);
@@ -150,10 +175,19 @@ final class Application
             : $installer->install($config, $cwd, $useUv, $dryRun, $exact);
     }
 
+    /** Something went wrong: exit code 1. */
     private function fail(string $message): int
     {
         ($this->err)("pyhp: {$message}".PHP_EOL);
 
-        return 1;
+        return self::FAILURE;
+    }
+
+    /** The command line itself is wrong (unknown command or option, bad value): exit code 2. */
+    private function usage(string $message): int
+    {
+        ($this->err)("pyhp: {$message}".PHP_EOL);
+
+        return self::USAGE_ERROR;
     }
 }

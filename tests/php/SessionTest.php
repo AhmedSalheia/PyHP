@@ -102,7 +102,7 @@ test('info reports the interpreter', function (): void {
     $py = testSession();
     $info = $py->info();
 
-    expect($info['protocol'])->toBe(3)
+    expect($info['protocol'])->toBe(4)
         ->and($info['python'])->toMatch('/^3\.\d+/')
         ->and($info['objects'])->toBe(0);
     $py->close();
@@ -175,6 +175,20 @@ test('env, cwd and extra paths reach the worker', function (): void {
         ->and($py->eval("__import__('os').path.realpath(__import__('os').getcwd())"))->toBe(realpath($dir))
         ->and($py->eval("__import__('pyhp_local_module').VALUE"))->toBe('local');
     $py->close();
+    removeDirectory($dir);
+});
+
+test('modules in the working directory are not importable unless it is in paths', function (): void {
+    $dir = sys_get_temp_dir().'/pyhp-test-'.bin2hex(random_bytes(4));
+    mkdir($dir);
+    file_put_contents($dir.'/pyhp_cwd_module.py', "VALUE = 'shadow'\n");
+    $py = testSession(['cwd' => $dir]);
+    $withPaths = testSession(['cwd' => $dir, 'paths' => [$dir]]);
+
+    expect($py->eval("__import__('importlib.util').util.find_spec('pyhp_cwd_module') is None"))->toBeTrue()
+        ->and($withPaths->eval("__import__('pyhp_cwd_module').VALUE"))->toBe('shadow');
+    $py->close();
+    $withPaths->close();
     removeDirectory($dir);
 });
 

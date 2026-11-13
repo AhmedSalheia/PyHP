@@ -8,6 +8,7 @@ use Closure;
 use PyHP\Exception\ProtocolException;
 use PyHP\Internal\Codec;
 use PyHP\Value\Dict;
+use PyHP\Value\NdArray;
 use PyHP\Value\Slice;
 use PyHP\Value\Tuple;
 use PyHP\Value\Vectorized;
@@ -76,10 +77,11 @@ final class Py
 
     /**
      * One long-lived session per name for this PHP process, for queue workers and
-     * app servers: created on first use with the "restart" option on, so it
+     * app servers: created on first use with the "auto_restart" option on, so it
      * survives crashes and timeouts, and $setup runs as its onStart hook (now and
      * after every restart). Later calls return the same session; their $setup
-     * and $overrides are ignored.
+     * and $overrides are ignored. The name is required, so a shared session is
+     * never mistaken for default(), which doesn't restart by itself.
      *
      * Under PHP-FPM a process serves one request at a time and PHP forgets static
      * state between requests, so there a shared session lives for one request.
@@ -87,10 +89,10 @@ final class Py
      * @param  (Closure(Session): mixed)|null  $setup  imports and models the session needs
      * @param  array<string, mixed>  $overrides  options for this session only
      */
-    public static function shared(string $name = 'default', ?Closure $setup = null, array $overrides = []): Session
+    public static function shared(string $name, ?Closure $setup = null, array $overrides = []): Session
     {
         if (! isset(self::$shared[$name])) {
-            $session = self::session(['restart' => true] + $overrides);
+            $session = self::session(['auto_restart' => true] + $overrides);
             if ($setup !== null) {
                 $session->onStart($setup);
             }
@@ -197,6 +199,18 @@ final class Py
         return new Dict($items);
     }
 
+    /**
+     * A NumPy array for Python, sent as raw bytes instead of JSON (much faster
+     * for big arrays): Py::ndarray([[1.5, 2], [3, 4]]) or Py::ndarray($pixels, 'uint8').
+     * $data must be rectangular nested lists; dtype is one of NdArray::DTYPES.
+     *
+     * @param  array<array-key, mixed>  $data
+     */
+    public static function ndarray(array $data, string $dtype = 'float64'): NdArray
+    {
+        return new NdArray($data, $dtype);
+    }
+
     /** Python len(obj). */
     public static function len(PyObject $object): int
     {
@@ -244,8 +258,9 @@ final class Py
 
     /**
      * Copy the Python object into a PHP value, also accepting sets and subclasses
-     * of dict/list/str/int/float. Throws ConversionException if any part has no
-     * PHP equivalent, instead of returning nested proxies.
+     * of dict/list/str/int/float. NumPy arrays become nested PHP arrays, copied
+     * as raw bytes (fast even for millions of numbers). Throws ConversionException
+     * if any part has no PHP equivalent, instead of returning nested proxies.
      */
     public static function toPhp(PyObject $object): mixed
     {
