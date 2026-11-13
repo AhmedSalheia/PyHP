@@ -10,7 +10,9 @@ the user points PyHP at (system Python, venv, conda, ...).
 
 Wire format: every message is a 4-byte big-endian length followed by that many
 bytes of UTF-8 JSON. Values that JSON cannot express are "tagged" objects with a
-``$t`` key (see ``encode`` and ``decode``).
+``$t`` key (see ``encode`` and ``decode``). A message with a ``bin`` field is
+followed by that many binary frames (same length prefix, raw bytes): the data of
+the NumPy arrays in it, referred to by index from their ``ndarray`` tags.
 """
 
 from __future__ import annotations
@@ -38,9 +40,9 @@ import traceback
 import types
 import weakref
 from collections.abc import Callable, Iterable, Iterator
-from typing import Final, Protocol, TypeAlias, cast
+from typing import Any, Final, Protocol, TypeAlias, cast
 
-PROTOCOL_VERSION: Final = 3
+PROTOCOL_VERSION: Final = 4
 # Oldest Python the worker runs on; older ones stop at start-up with a message.
 MIN_PYTHON: Final = (3, 11)
 # The worker's own folder, kept off sys.path.
@@ -62,6 +64,8 @@ HEADER: Final = struct.Struct(">I")
 # How long a new connection may take to authenticate before it's dropped.
 AUTH_TIMEOUT: Final = 2.0
 MAX_AUTH_FRAME: Final = 4096
+# Binary frames one message may announce (one per NumPy array in it).
+MAX_BINARY_FRAMES: Final = 65536
 
 # PHP converts string keys that look like canonical decimal integers into int keys.
 _PHP_INT_KEY: Final = re.compile(r"^(0|-?[1-9][0-9]*)$")
@@ -175,6 +179,8 @@ class _EncodeState:
         # Validated key sets: rows of a table repeat the same keys, and checking
         # keys is the most expensive part of converting a dict.
         self.key_sets: dict[tuple[object, ...], tuple[str, ...] | None] = {}
+        # Data of NumPy arrays, sent as binary frames after the message (to_php only).
+        self.buffers: list[bytes] = []
 
     def tag(self, value: Json) -> Json:
         self.tagged = True
@@ -245,6 +251,14 @@ def encode_value(value: object, registry: Registry, *, strict: bool = False) -> 
     return result, state.tagged
 
 
+def encode_for_php(value: object, registry: Registry) -> _Raw:
+    """Strict conversion (``to_php``), with NumPy arrays as binary buffers."""
+    _ensure_recursion_room()
+    state = _EncodeState(registry, strict=True)
+    result = _encode(value, state, 0)
+    return _Raw(result, state.tagged, state.buffers)
+
+
 def _ensure_recursion_room() -> None:
     """Make room for MAX_DEPTH levels of nesting (a few frames each).
 
@@ -286,6 +300,9 @@ def _encode(value: object, state: _EncodeState, depth: int) -> Json:  # fast pat
     if isinstance(value, PhpCallable):
         return state.tag({"$t": "callback", "id": value._callback_id})
 
+    if state.strict and _is_ndarray(value):
+        return _encode_ndarray(cast("Any", value), state, depth)
+
     if _is_container(value, state.strict):
         if id(value) in state.path or depth >= MAX_DEPTH:
             if state.strict:
@@ -307,6 +324,48 @@ def _encode(value: object, state: _EncodeState, depth: int) -> Json:  # fast pat
         msg = f"cannot convert a {type_name(value)} to a PHP value"
         raise ConversionError(msg)
     return state.ref(value)
+
+
+# NumPy dtypes on the wire: little-endian, named like NumPy's own codes.
+ARRAY_DTYPES: Final = ("b1", "i1", "i2", "i4", "i8", "u1", "u2", "u4", "f4", "f8")
+
+
+def _is_ndarray(value: object) -> bool:
+    numpy = sys.modules.get("numpy")
+    ndarray = getattr(numpy, "ndarray", None)
+    return isinstance(ndarray, type) and isinstance(value, ndarray)
+
+
+def _wire_dtype(kind: str, size: int) -> str | None:
+    """The wire dtype a NumPy array of this kind and item size is sent as, if any."""
+    if kind == "b":
+        return "b1"
+    if kind in ("i", "u") and size in (1, 2, 4, 8):
+        return f"{kind}{size}"
+    if kind == "f":
+        return "f4" if size <= 4 else "f8"
+    return None
+
+
+def _encode_ndarray(array: Any, state: _EncodeState, depth: int) -> Json:  # noqa: ANN401  # numpy is not imported here
+    if array.ndim == 0:
+        return _encode(array.item(), state, depth)
+    wire = _wire_dtype(array.dtype.kind, array.dtype.itemsize)
+    if wire is None:  # strings, objects, dates, complex: value by value
+        return _encode(array.tolist(), state, depth)
+    if wire == "u8":
+        if array.size and int(array.max()) > INT64_MAX:
+            msg = (
+                f"cannot convert a numpy.ndarray of uint64 values above {INT64_MAX} "
+                "(the largest PHP int)"
+            )
+            raise ConversionError(msg)
+        wire = "i8"
+    data: bytes = array.astype("<" + wire, copy=False).tobytes(order="C")
+    state.buffers.append(data)
+    return state.tag(
+        {"$t": "ndarray", "dtype": wire, "shape": list(array.shape), "buf": len(state.buffers) - 1}
+    )
 
 
 def _encode_scalar(value: object, strict: bool) -> Json:  # one flat type switch
@@ -426,12 +485,15 @@ CallbackFactory: TypeAlias = Callable[[int], object]
 
 
 def decode(  # one flat tag switch
-    data: object, registry: Registry, callbacks: CallbackFactory | None = None
+    data: object,
+    registry: Registry,
+    callbacks: CallbackFactory | None = None,
+    buffers: list[bytearray] | None = None,
 ) -> object:
     if data is None or isinstance(data, (bool, int, float, str)):
         return data
     if isinstance(data, list):
-        return [decode(item, registry, callbacks) for item in data]
+        return [decode(item, registry, callbacks, buffers) for item in data]
     if not isinstance(data, dict):
         msg = f"unexpected wire value of type {type_name(data)}"
         raise ConversionError(msg)
@@ -445,7 +507,7 @@ def decode(  # one flat tag switch
             raise ConversionError(msg)
         return callbacks(_require_int(data.get("id"), "callback id"))
     if tag == "vectorize":
-        function = decode(data.get("fn"), registry, callbacks)
+        function = decode(data.get("fn"), registry, callbacks, buffers)
         batch = _require_int(data.get("batch"), "batch size")
         if not isinstance(function, PhpCallable) or batch < 1:
             msg = "Py::vectorize() needs a PHP closure and a batch size of at least 1"
@@ -455,13 +517,17 @@ def decode(  # one flat tag switch
         result: dict[object, object] = {}
         for pair in _require_list(raw, "dict pairs"):
             key, item = _require_list(pair, "dict pair")
-            result[decode(key, registry, callbacks)] = decode(item, registry, callbacks)
+            result[decode(key, registry, callbacks, buffers)] = decode(
+                item, registry, callbacks, buffers
+            )
         return result
     if tag == "tuple":
-        return tuple(decode(item, registry, callbacks) for item in _require_list(raw, "tuple"))
+        return tuple(
+            decode(item, registry, callbacks, buffers) for item in _require_list(raw, "tuple")
+        )
     if tag == "slice":
         start, stop, step = (
-            decode(item, registry, callbacks) for item in _require_list(raw, "slice")
+            decode(item, registry, callbacks, buffers) for item in _require_list(raw, "slice")
         )
         return slice(start, stop, step)
     if tag == "bytes":
@@ -474,8 +540,48 @@ def decode(  # one flat tag switch
             return float(str(raw))
         msg = f"invalid special float {raw!r}"
         raise ConversionError(msg)
+    if tag == "ndarray":
+        return _decode_ndarray(data, buffers or [])
     msg = f"unknown value tag {tag!r}"
     raise ConversionError(msg)
+
+
+def _decode_ndarray(data: dict[str, object], buffers: list[bytearray]) -> object:
+    dtype = data.get("dtype")
+    if dtype not in ARRAY_DTYPES:
+        msg = f"unknown array dtype {dtype!r}"
+        raise ConversionError(msg)
+    shape = data.get("shape")
+    if not isinstance(shape, list) or not all(type(size) is int and size >= 0 for size in shape):
+        msg = "array shape must be a list of sizes"
+        raise ConversionError(msg)
+    index = data.get("buf")
+    if type(index) is not int:
+        msg = "array buffer must be an integer"
+        raise ConversionError(msg)
+    if not 0 <= index < len(buffers):
+        msg = f"array buffer {index} was not sent"
+        raise ConversionError(msg)
+    buffer = buffers[index]
+    needed = math.prod(shape) * int(dtype[1])
+    if len(buffer) != needed:
+        msg = (
+            f"array buffer {index} holds {len(buffer)} bytes, "
+            f"but shape {shape} of {dtype} needs {needed}"
+        )
+        raise ConversionError(msg)
+    try:
+        numpy = importlib.import_module("numpy")
+    except ImportError:
+        msg = "Py::ndarray() needs NumPy in the Python environment (pip install numpy)"
+        raise ConversionError(msg) from None
+    # A bytearray makes a writable array without copying the data.
+    return numpy.frombuffer(buffer, dtype="<" + dtype).reshape(shape)
+
+
+def _buffers_of(message: Request) -> list[bytearray]:
+    """The binary frames that came with a message (see Connection.receive)."""
+    return cast("list[bytearray]", message.get("_buffers", []))
 
 
 def _require_int(value: object, what: str) -> int:
@@ -502,9 +608,10 @@ Handler: TypeAlias = Callable[[Request], object]
 class _Raw:
     """Marks a handler result that is already wire-encoded."""
 
-    def __init__(self, value: Json, tagged: bool) -> None:
+    def __init__(self, value: Json, tagged: bool, buffers: list[bytes] | None = None) -> None:
         self.value = value
         self.tagged = tagged
+        self.buffers = buffers or []
 
 
 class _Subscriptable(Protocol):
@@ -696,7 +803,7 @@ class Session:
             "repr": lambda r: repr(self._target(r)),
             "len": lambda r: len(self._sized(r)),
             "type": lambda r: type_name(self._target(r)),
-            "to_php": lambda r: _Raw(*encode_value(self._target(r), self.registry, strict=True)),
+            "to_php": lambda r: encode_for_php(self._target(r), self.registry),
             "iter": lambda r: self._as_ref(iter(self._iterable(r))),
             "next_batch": self._next_batch,
             "table": self._table,
@@ -730,8 +837,9 @@ class Session:
                     result = handler(request)
             finally:
                 self._active_requests -= 1
+            buffers: list[bytes] = []
             if isinstance(result, _Raw):
-                value, tagged = result.value, result.tagged
+                value, tagged, buffers = result.value, result.tagged, result.buffers
             else:
                 value, tagged = encode_value(result, self.registry)
         except (WorkerExit, FatalFrameError):
@@ -744,7 +852,15 @@ class Session:
             return _error_response("conversion", error, output)
         except BaseException as error:  # forwarded to PHP as PythonException
             return _error_response("python", error, output, with_traceback=True)
-        return {"ok": True, "value": value, "tagged": tagged, "out": output.getvalue()}
+        response: Response = {
+            "ok": True,
+            "value": value,
+            "tagged": tagged,
+            "out": output.getvalue(),
+        }
+        if buffers:
+            response["_buffers"] = buffers  # sent as binary frames by Connection.send
+        return response
 
     # -- PHP callbacks ------------------------------------------------------- #
 
@@ -807,7 +923,7 @@ class Session:
         # Decode the result before applying releases: PHP drops its proxy right
         # after encoding it, so a returned proxy is often released in this frame.
         value = (
-            decode(frame.get("value"), self.registry, self._callback_for)
+            decode(frame.get("value"), self.registry, self._callback_for, _buffers_of(frame))
             if frame.get("ok") is True
             else None
         )
@@ -883,18 +999,23 @@ class Session:
         if key not in request:
             msg = f"missing field {key!r}"
             raise ProtocolError(msg)
-        return decode(request[key], self.registry, self._callback_for)
+        return decode(request[key], self.registry, self._callback_for, _buffers_of(request))
 
     def _call_args(self, request: Request) -> tuple[list[object], dict[str, object]]:
+        buffers = _buffers_of(request)
         args = decode(
-            _require_list(request.get("args", []), "args"), self.registry, self._callback_for
+            _require_list(request.get("args", []), "args"),
+            self.registry,
+            self._callback_for,
+            buffers,
         )
         raw_kwargs = request.get("kwargs", {})
         if not isinstance(raw_kwargs, dict):
             msg = "kwargs must be an object"
             raise ProtocolError(msg)
         kwargs = {
-            str(k): decode(v, self.registry, self._callback_for) for k, v in raw_kwargs.items()
+            str(k): decode(v, self.registry, self._callback_for, buffers)
+            for k, v in raw_kwargs.items()
         }
         assert isinstance(args, list)  # noqa: S101  # decode of a list is a list
         return args, kwargs
@@ -1237,13 +1358,21 @@ def _isolate_stdio() -> None:
 
 
 def _recv_exact(sock: socket.socket, size: int) -> bytes | None:
-    data = bytearray()
-    while len(data) < size:
-        chunk = sock.recv(size - len(data))
-        if not chunk:
+    data = _recv_buffer(sock, size)
+    return None if data is None else bytes(data)
+
+
+def _recv_buffer(sock: socket.socket, size: int) -> bytearray | None:
+    """Exactly `size` bytes, or None when the connection closes first."""
+    data = bytearray(size)
+    view = memoryview(data)
+    received = 0
+    while received < size:
+        count = sock.recv_into(view[received:], size - received)
+        if not count:
             return None
-        data.extend(chunk)
-    return bytes(data)
+        received += count
+    return data
 
 
 class Connection:
@@ -1254,11 +1383,19 @@ class Connection:
         self.max_frame = max_frame
 
     def send(self, message: Response) -> None:
-        """Send a response; one that is too large is replaced by an error response."""
+        """Send a response; one that is too large is replaced by an error response.
+
+        Buffers under the ``_buffers`` key follow the JSON frame as binary frames.
+        """
+        buffers = cast("list[bytes]", message.pop("_buffers", []))
+        if buffers:
+            message["bin"] = len(buffers)
         body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
-        if len(body) > self.max_frame:
+        size = max([len(body), *map(len, buffers)])
+        if size > self.max_frame:
+            buffers = []
             too_large = ProtocolError(
-                f"the response is {len(body)} bytes, above the {self.max_frame}-byte limit; "
+                f"the response is {size} bytes, above the {self.max_frame}-byte limit; "
                 "keep the value in Python (use a reference) or raise max_message_bytes"
             )
             out = message.get("out")
@@ -1269,6 +1406,9 @@ class Connection:
                 ensure_ascii=False,
             ).encode("utf-8")
         self.sock.sendall(HEADER.pack(len(body)) + body)
+        for buffer in buffers:
+            self.sock.sendall(HEADER.pack(len(buffer)))
+            self.sock.sendall(buffer)
 
     def send_call(self, message: dict[str, object]) -> None:
         """Send a callback call; one that is too large raises ConversionError."""
@@ -1301,7 +1441,28 @@ class Connection:
         if not isinstance(request, dict):
             msg = "request is not a JSON object"
             raise FatalFrameError(msg)
+        if "bin" in request:
+            request["_buffers"] = self._receive_binary(request.pop("bin"))
         return request
+
+    def _receive_binary(self, count: object) -> list[bytearray]:
+        if type(count) is not int or not 0 <= count <= MAX_BINARY_FRAMES:
+            msg = "request announces an invalid number of binary frames"
+            raise FatalFrameError(msg)
+        buffers = []
+        for _ in range(count):
+            header = _recv_exact(self.sock, HEADER.size)
+            if header is None:
+                raise WorkerExit
+            (length,) = HEADER.unpack(header)
+            if length > self.max_frame:
+                msg = f"binary frame of {length} bytes exceeds the limit"
+                raise FatalFrameError(msg)
+            buffer = _recv_buffer(self.sock, length)
+            if buffer is None:
+                raise WorkerExit
+            buffers.append(buffer)
+        return buffers
 
 
 def serve(sock: socket.socket, token: str, max_frame: int) -> int:
