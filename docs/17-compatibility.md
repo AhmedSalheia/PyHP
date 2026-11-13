@@ -22,7 +22,7 @@ The **public API** is everything below. A change that could break code using it 
 
 * **PHP classes** in `PyHP\`, `PyHP\Value\` and `PyHP\Exception\`: their public constants, properties and methods, **including parameter names** (PHP's named arguments make them part of the API), types and defaults. The exact list is [`tests/php/public-api.txt`](../tests/php/public-api.txt); a test fails whenever the code and that list differ.
 * **Options** of `Config`, `Py::config()` and `Py::session()`: the keys, their types, and what they do. Default values change only in a major release.
-* **The `pyhp` command**: its commands (`setup`, `lock`, `info`, `help`), their options, and the [exit codes](03-command-line.md#exit-codes).
+* **The `pyhp` command**: its commands (`setup`, `lock`, `info`, `help`), their options, the [exit codes](03-command-line.md#exit-codes), and the fields of [`pyhp info --json`](03-command-line.md#pyhp-info---json) (new fields can be added in minor releases; existing ones keep their meaning).
 * **`composer.json` keys** under `extra.pyhp`: `python`, `venv`, `requirements`, `ignore-packages`, `overrides`, in your project and in the packages it installs.
 * **The Python side**: the `pyhp` module (`PhpError` with `php_class` and `php_message`, and `PhpCallable`), and how your code runs in a session (the namespace is called `__pyhp__`).
 * **Documented behaviour**: how values are converted, timeouts, output modes, restarts, and anything else these docs describe as how PyHP works.

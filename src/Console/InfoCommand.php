@@ -19,10 +19,12 @@ use PyHP\Setup\PythonLocation;
 use PyHP\Setup\PythonSource;
 use PyHP\Setup\Requirement;
 use PyHP\Setup\SetupConfig;
+use stdClass;
 
 /**
  * `pyhp info`: everything worth knowing when PyHP doesn't work as expected,
  * from PHP and the chosen interpreter to missing packages and a live worker test.
+ * `pyhp info --json` prints the same facts as one JSON document (see FORMAT).
  *
  * @internal Part of the pyhp command line, not of the public API: use `vendor/bin/pyhp` instead.
  */
@@ -45,10 +47,18 @@ final class InfoCommand
                           "executable": sys.executable, "prefix": sys.prefix, "packages": packages}))
         PY;
 
+    /** Version of the --json document; fields are only added within a version. */
+    public const FORMAT = 1;
+
     private const LABEL_WIDTH = 14;
 
     /** @var list<string> */
     private array $problems = [];
+
+    private bool $json = false;
+
+    /** @var array<string, mixed> what --json prints */
+    private array $report = [];
 
     /** @var Closure(string): ?string */
     private readonly Closure $workerCheck;
@@ -66,9 +76,11 @@ final class InfoCommand
     }
 
     /** @return int 0 when everything looks fine, 1 when problems were found */
-    public function run(string $root): int
+    public function run(string $root, bool $json = false): int
     {
         $this->problems = [];
+        $this->json = $json;
+        $this->report = [];
         $setup = SetupConfig::fromProject($root);
         $location = Config::locatePython($root);
 
@@ -78,6 +90,15 @@ final class InfoCommand
         $names = $this->project($root, $setup, $requirements);
         $this->python($root, $location, $names, $requirements->overrides() !== []);
         $this->problemsReport();
+
+        if ($json) {
+            ($this->out)(json_encode([
+                'format' => self::FORMAT,
+                'ok' => $this->problems === [],
+                ...$this->report,
+                'problems' => $this->problems,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).PHP_EOL);
+        }
 
         return $this->problems === [] ? 0 : 1;
     }
@@ -110,6 +131,19 @@ final class InfoCommand
         $disabled = array_map(trim(...), explode(',', (string) ini_get('disable_functions')));
         $procOpen = function_exists('proc_open') && ! in_array('proc_open', $disabled, true);
         $this->row('proc_open', $procOpen ? 'available' : 'DISABLED');
+        $this->report['pyhp'] = ['version' => self::pyhpVersion()];
+        $this->report['php'] = [
+            'version' => PHP_VERSION,
+            'sapi' => PHP_SAPI,
+            'zts' => PHP_ZTS === 1,
+            'bits' => PHP_INT_SIZE * 8,
+            'binary' => PHP_BINARY,
+            'os' => PHP_OS_FAMILY,
+            'os_release' => php_uname('r'),
+            'machine' => php_uname('m'),
+            'ini' => $ini === false ? null : $ini,
+            'proc_open' => $procOpen,
+        ];
         if (! $procOpen) {
             $this->problems[] = 'proc_open() is disabled in php.ini (disable_functions); PyHP needs it to start Python.';
         }
@@ -124,6 +158,20 @@ final class InfoCommand
         $this->heading('Project');
         $this->row('Root', $root);
         $this->row('Python wanted', $setup->python ?? 'any (extra.pyhp.python not set)');
+        $this->report['project'] = [
+            'root' => $root,
+            'python' => $setup->python,
+            'requirements_file' => $setup->requirementsFile === null ? null : [
+                'path' => $setup->requirementsFile,
+                'exists' => is_file($root.DIRECTORY_SEPARATOR.$setup->requirementsFile),
+            ],
+            'requirements' => array_map(
+                static fn (Requirement $r): array => ['spec' => $r->spec, 'origin' => $r->origin],
+                $requirements->all(),
+            ),
+            'ignored' => $requirements->ignored(),
+            'overrides' => $requirements->overrides(),
+        ];
 
         if ($setup->requirementsFile !== null && ! is_file($root.DIRECTORY_SEPARATOR.$setup->requirementsFile)) {
             $this->row('Requirements', "{$setup->requirementsFile} (not found)");
@@ -156,6 +204,7 @@ final class InfoCommand
         $file = $root.DIRECTORY_SEPARATOR.LockFile::NAME;
         if (! is_file($file)) {
             $this->row('Lock file', 'none (optional; vendor/bin/pyhp lock writes one with exact versions)');
+            $this->reportLock(null, 'none', 0);
 
             return;
         }
@@ -163,11 +212,20 @@ final class InfoCommand
         $count = count(LockFile::packageNames($contents));
         if (LockFile::fingerprintIn($contents) === LockFile::fingerprint($root, $setup, $requirements)) {
             $this->row('Lock file', LockFile::NAME." (up to date, {$count} packages)");
+            $this->reportLock(LockFile::NAME, 'up_to_date', $count);
 
             return;
         }
         $this->row('Lock file', LockFile::NAME.' (out of date)');
+        $this->reportLock(LockFile::NAME, 'out_of_date', $count);
         $this->problems[] = LockFile::NAME.' is out of date: the Python requirements changed since it was written. Run: vendor/bin/pyhp lock';
+    }
+
+    private function reportLock(?string $file, string $status, int $packages): void
+    {
+        $project = is_array($this->report['project'] ?? null) ? $this->report['project'] : [];
+        $project['lock'] = ['file' => $file, 'status' => $status, 'packages' => $packages];
+        $this->report['project'] = $project;
     }
 
     /** @param list<string> $requirements */
@@ -185,6 +243,18 @@ final class InfoCommand
 
         $uv = $this->runner->find('uv');
         $uvVersion = $uv === null ? null : $this->runner->capture([$uv, '--version'], $root);
+        /** @var array<string, mixed> $report */
+        $report = [
+            'interpreter' => $location->python,
+            'chosen_by' => $location->source->value,
+            'venv' => $location->venv === null ? null : [
+                'path' => $location->venv,
+                'exists' => $location->source === PythonSource::ProjectVenv,
+            ],
+            'uv' => $uv === null ? null : ['path' => $uv, 'version' => $uvVersion],
+            'started' => false,
+        ];
+        $this->report['python'] = $report;
         if ($uv === null && $hasOverrides) {
             $this->problems[] = 'extra.pyhp.overrides needs uv, which is not installed: '.Installer::UV_INSTALL_URL;
         }
@@ -197,6 +267,7 @@ final class InfoCommand
         $details = $probe === null ? null : self::decode($probe);
         if ($details === null) {
             $this->row('Status', 'could not be started');
+            $this->report['python'] = $report;
             $this->problems[] = "Python could not be started: {$location->python}";
 
             return;
@@ -228,9 +299,17 @@ final class InfoCommand
 
         $started = microtime(true);
         $error = ($this->workerCheck)($location->python);
-        $this->row('Worker', $error === null
-            ? sprintf('started and answered in %d ms', (int) round((microtime(true) - $started) * 1000))
-            : 'FAILED');
+        $milliseconds = (int) round((microtime(true) - $started) * 1000);
+        $this->row('Worker', $error === null ? "started and answered in {$milliseconds} ms" : 'FAILED');
+        $this->report['python'] = [
+            ...$report,
+            'started' => true,
+            'version' => $details['version'],
+            'implementation' => $details['implementation'],
+            'executable' => $details['executable'],
+            'packages' => $details['packages'] === [] ? new stdClass : $details['packages'],
+            'worker' => ['ok' => $error === null, 'error' => $error, 'ms' => $milliseconds],
+        ];
         if ($error !== null) {
             $this->problems[] = "The PyHP worker failed: {$error}";
         }
@@ -291,17 +370,26 @@ final class InfoCommand
 
     private function heading(string $title): void
     {
+        if ($this->json) {
+            return;
+        }
         $this->say('');
         $this->say($title);
     }
 
     private function row(string $label, string $value): void
     {
+        if ($this->json) {
+            return;
+        }
         $this->say('  '.str_pad($label, self::LABEL_WIDTH).' '.$value);
     }
 
     private function say(string $line): void
     {
+        if ($this->json) {
+            return;
+        }
         ($this->out)($line.PHP_EOL);
     }
 }

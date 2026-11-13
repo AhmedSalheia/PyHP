@@ -29,7 +29,8 @@ final class Application
         Usage:
           pyhp setup [options]   Create the project's Python environment and install its packages
           pyhp lock [options]    Resolve every Python requirement and write exact versions to pyhp.lock
-          pyhp info              Show PHP, Python, venv and package details for debugging
+          pyhp info [--json]     Show PHP, Python, venv and package details for debugging
+                                 (--json: the same as one JSON document, for scripts)
           pyhp help              Show this help
 
         Run it from your project's root folder (where composer.json is).
@@ -82,8 +83,15 @@ final class Application
             return 0;
         }
         if ($command === 'info') {
+            $json = false;
+            foreach (array_slice($args, 1) as $option) {
+                if ($option !== '--json') {
+                    return $this->usage(sprintf('Unknown option "%s" for info. Run "pyhp help" to see the options.', $option));
+                }
+                $json = true;
+            }
             try {
-                return (new InfoCommand($this->runner, $this->out, $this->workerCheck))->run($cwd);
+                return (new InfoCommand($this->runner, $this->out, $this->workerCheck))->run($cwd, $json);
             } catch (ConfigException $e) {
                 return $this->fail($e->getMessage());
             }
