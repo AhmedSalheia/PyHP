@@ -79,14 +79,14 @@ TDD, 80% minimum coverage, `declare(strict_types=1)` everywhere, PHPStan level m
 
 ### The documentation website
 
-https://pyhp-php.github.io/pyhp/ is built with [VitePress](https://vitepress.dev/) straight from the files in `docs/`, so there is one copy of every page. `docs/.vitepress/config.mts` adapts them for the site: the numbered files become the sidebar in order (a new `NN-name.md` appears by itself, at `/name`), links that leave `docs/` point at GitHub, and the "← · Contents · →" lines at the end of each page are left out because the site has its own. `docs/index.md` is the home page; `docs/README.md` stays the contents page on GitHub and isn't on the site, and neither is `docs/tasks/`.
+https://pyhp-php.github.io/PyHP/ is built with [VitePress](https://vitepress.dev/) straight from the files in `docs/`, so there is one copy of every page. `docs/.vitepress/config.mts` adapts them for the site: the numbered files become the sidebar in order (a new `NN-name.md` appears by itself, at `/name`), links that leave `docs/` point at GitHub, and the "← · Contents · →" lines at the end of each page are left out because the site has its own. `docs/index.md` is the home page; `docs/README.md` stays the contents page on GitHub and isn't on the site, and neither is `docs/tasks/`.
 
 To work on it, you need Node.js 20 or newer:
 
 ```bash
 cd docs
 npm ci
-npm run dev      # http://localhost:5173/pyhp/, reloads as you edit
+npm run dev      # http://localhost:5173/PyHP/, reloads as you edit
 npm run build    # what CI runs; fails on dead links
 ```
 

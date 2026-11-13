@@ -1,6 +1,6 @@
 # PyHP documentation
 
-Read the files in order; each one builds on the previous ones. The same pages are on the website: https://pyhp-php.github.io/pyhp/
+Read the files in order; each one builds on the previous ones. The same pages are on the website: https://pyhp-php.github.io/PyHP/
 
 1. [Introduction](01-introduction.md)
 2. [Installation](02-installation.md)
