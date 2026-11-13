@@ -45,7 +45,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         php: ["8.2", "8.5"]
-        experimental: [false]
         include:
           - php: "8.2"
             python: "3.11"
@@ -55,23 +54,19 @@ jobs:
           - os: ubuntu-24.04-arm
             php: "8.2"
             python: "3.11"
-            experimental: false
           - os: ubuntu-24.04-arm
             php: "8.5"
             python: "3.14"
-            experimental: false
           # Windows on ARM: PHP has no native ARM64 build for Windows, so it runs as x64
           # under Windows' emulation next to a native Python, as it does on users'
-          # machines. Non-blocking until it has proven stable.
+          # machines.
           - os: windows-11-arm
             php: "8.5"
             python: "3.14"
-            experimental: true
-          # Early warning for the next PHP; it can't fail the build until it's final.
+          # The next PHP, so a break shows up before users upgrade.
           - os: ubuntu-latest
             php: "8.6"
             python: "3.14"
-            experimental: true
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
