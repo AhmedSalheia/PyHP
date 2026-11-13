@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import builtins
+import collections
 import contextlib
 import hmac
 import importlib
@@ -51,6 +52,9 @@ _SCRIPT_DIR: Final = os.path.realpath(os.path.dirname(os.path.abspath(__file__))
 MAX_CALLBACK_DEPTH: Final = 32
 # Most characters sent in one live output frame.
 OUTPUT_CHUNK: Final = 16 * 1024
+# Inline exec()/eval() snippets whose source tracebacks can still show; older ones
+# are dropped from linecache so a long-running session doesn't grow without bound.
+MAX_SNIPPETS: Final = 1000
 # Module that Python code imports PyHP's own types from: `from pyhp import PhpError`.
 PUBLIC_MODULE: Final = "pyhp"
 INT64_MIN: Final = -(2**63)
@@ -672,8 +676,13 @@ class _LiveOutput(io.StringIO):
             cut = text.rfind("\n") + 1 if whole_lines else len(text)
             ready, rest = text[:cut], text[cut:]
             self._pending = [rest] if rest else []
-        for start in range(0, len(ready), OUTPUT_CHUNK):
-            self._bridge.send_call({"op": "output", "text": ready[start : start + OUTPUT_CHUNK]})
+        # A character takes at most 6 bytes in the JSON frame (as a \u00XX escape).
+        max_frame = getattr(self._bridge, "max_frame", None)
+        chunk = (
+            OUTPUT_CHUNK if max_frame is None else max(1, min(OUTPUT_CHUNK, (max_frame - 64) // 6))
+        )
+        for start in range(0, len(ready), chunk):
+            self._bridge.send_call({"op": "output", "text": ready[start : start + chunk]})
 
 
 class PhpVectorized:
@@ -760,6 +769,7 @@ class Session:
         self.globals["__builtins__"] = builtins
         self.registry = Registry()
         self._snippets = 0
+        self._snippet_names: collections.deque[str] = collections.deque()
         # PHP callbacks
         self.bridge = bridge
         self.callback_depth = 0
@@ -1027,6 +1037,9 @@ class Session:
             # Lets tracebacks show the offending source line of inline code.
             lines = source.splitlines(keepends=True)
             linecache.cache[filename] = (len(source), None, lines, filename)
+            self._snippet_names.append(filename)
+            if len(self._snippet_names) > MAX_SNIPPETS:
+                linecache.cache.pop(self._snippet_names.popleft(), None)
         return compile(source, filename, mode)
 
     # -- handlers ------------------------------------------------------------- #
@@ -1342,6 +1355,70 @@ def _error_response(
 # --------------------------------------------------------------------------- #
 
 
+CUT_NOTE: Final = "[pyhp: cut to fit max_message_bytes]"
+
+
+def _json_bytes(message: object) -> bytes:
+    """A message as UTF-8 JSON. Text that isn't valid Unicode (an unpaired surrogate
+    such as "\\ud800", which Python allows in str) is sent as "?" instead of failing."""
+    return json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8", "replace")
+
+
+def _fit(message: Response, limit: int) -> bytes | None:
+    """The message as JSON of at most `limit` bytes, or None if it can't be made to fit.
+
+    In this order, as far as needed: the printed output keeps its end (the most
+    recent lines) behind a note saying how much was cut; an error loses its
+    traceback; an error message keeps its start. The value is never changed.
+    """
+    body = _json_bytes(message)
+    if len(body) <= limit:
+        return body
+    fitted: Response = dict(message)
+    out = fitted.get("out")
+    fitted["out"] = ""
+    error = fitted.get("error")
+    if isinstance(error, dict):
+        error = dict(error)
+        fitted["error"] = error
+        if len(_json_bytes(fitted)) > limit:
+            error["traceback"] = ""
+        if len(_json_bytes(fitted)) > limit:
+            text = str(error.get("message", ""))
+            error["message"] = ""
+            room = limit - len(_json_bytes(fitted)) - len(CUT_NOTE) - 1
+            error["message"] = _within(text, room, keep_start=True) + " " + CUT_NOTE
+    room = limit - len(_json_bytes(fitted))
+    if room < 0:
+        return None
+    if isinstance(out, str) and out:
+        fitted["out"] = _within(out, room, keep_start=False)
+    body = _json_bytes(fitted)
+    return body if len(body) <= limit else None
+
+
+def _within(text: str, room: int, *, keep_start: bool) -> str:
+    """As much of `text` as takes at most `room` bytes inside a JSON string.
+
+    Kept from the start (error messages) or from the end, with a note saying how
+    many characters were cut (printed output, where the last lines matter most).
+    """
+    keep = len(text)
+    while keep > 0:
+        part = text[:keep] if keep_start else text[len(text) - keep :]
+        cut = len(text) - keep
+        if cut and not keep_start:
+            part = (
+                f"[pyhp: the first {cut} characters of output were cut to fit "
+                f"max_message_bytes]\n{part}"
+            )
+        size = len(_json_bytes(part)) - 2  # without the quotes
+        if size <= room:
+            return part
+        keep = min(keep - 1, keep * room // size)
+    return ""
+
+
 def _isolate_stdio() -> None:
     """Keep user code away from the process's real stdin/stdout.
 
@@ -1390,21 +1467,22 @@ class Connection:
         buffers = cast("list[bytes]", message.pop("_buffers", []))
         if buffers:
             message["bin"] = len(buffers)
-        body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
-        size = max([len(body), *map(len, buffers)])
-        if size > self.max_frame:
+        largest_buffer = max(map(len, buffers), default=0)
+        # Printed output or a long error must not cost the call (or the session):
+        # _fit() shortens them. Only a value that is itself too large fails.
+        body = _fit(message, self.max_frame) if largest_buffer <= self.max_frame else None
+        if body is None:
             buffers = []
+            size = max(len(_json_bytes({**message, "out": ""})), largest_buffer)
             too_large = ProtocolError(
                 f"the response is {size} bytes, above the {self.max_frame}-byte limit; "
                 "keep the value in Python (use a reference) or raise max_message_bytes"
             )
             out = message.get("out")
-            body = json.dumps(
-                _error_response(
-                    "too_large", too_large, io.StringIO(out if isinstance(out, str) else "")
-                ),
-                ensure_ascii=False,
-            ).encode("utf-8")
+            error = _error_response(
+                "too_large", too_large, io.StringIO(out if isinstance(out, str) else "")
+            )
+            body = _fit(error, self.max_frame) or _json_bytes(error)
         self.sock.sendall(HEADER.pack(len(body)) + body)
         for buffer in buffers:
             self.sock.sendall(HEADER.pack(len(buffer)))
@@ -1412,7 +1490,7 @@ class Connection:
 
     def send_call(self, message: dict[str, object]) -> None:
         """Send a callback call; one that is too large raises ConversionError."""
-        body = json.dumps(message, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        body = _json_bytes(message)
         if len(body) > self.max_frame:
             msg = (
                 f"the arguments of a PHP callback are {len(body)} bytes, above the "
@@ -1509,12 +1587,13 @@ def _authenticated(conn: socket.socket, token: str, timeout: float) -> bool:
     except (OSError, ValueError):  # timeouts, resets, invalid JSON or UTF-8
         return False
     offered = message.get("token") if isinstance(message, dict) else None
-    return (
-        isinstance(message, dict)
-        and message.get("op") == "auth"
-        and isinstance(offered, str)
-        and hmac.compare_digest(offered.encode(), token.encode())
-    )
+    if not isinstance(message, dict) or message.get("op") != "auth" or not isinstance(offered, str):
+        return False
+    try:
+        offered_bytes = offered.encode()
+    except UnicodeEncodeError:  # e.g. an unpaired surrogate ("\ud800") from json.loads
+        return False
+    return hmac.compare_digest(offered_bytes, token.encode())
 
 
 def _accept_php(server: socket.socket, token: str, deadline: float) -> socket.socket | None:

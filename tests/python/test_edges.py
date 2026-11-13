@@ -424,8 +424,8 @@ def test_unreadable_requests_are_fatal_with_a_reason(body: bytes, message: str) 
 
 
 def test_a_response_above_the_limit_says_how_to_fix_it() -> None:
-    connection, php = connected(200)
-    connection.send({"ok": True, "value": "x" * 500, "out": "kept"})
+    connection, php = connected(1024)  # the smallest max_message_bytes
+    connection.send({"ok": True, "value": "x" * 2000, "out": "kept"})
 
     response = json.loads(frame_of(php))
     assert response["ok"] is False
@@ -563,6 +563,6 @@ def test_table_errors_name_the_column_and_the_problem() -> None:
 
 
 def test_a_too_large_response_keeps_its_output_as_utf8() -> None:
-    connection, php = connected(200)
-    connection.send({"ok": True, "value": "x" * 500, "out": "kép"})
+    connection, php = connected(1024)
+    connection.send({"ok": True, "value": "x" * 2000, "out": "kép"})
     assert "kép".encode() in frame_of(php)
