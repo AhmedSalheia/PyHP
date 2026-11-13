@@ -39,7 +39,9 @@ test('help is shown without arguments and with help or --help', function (array 
     'no arguments' => [[]],
     'help' => [['help']],
     '--help' => [['--help']],
+    '-h' => [['-h']],
     'setup --help' => [['setup', '--help']],
+    'setup -h' => [['setup', '-h']],
 ]);
 
 test('setup reads composer.json and applies command line options', function (): void {
@@ -152,4 +154,65 @@ test('the help mentions lock and --exact', function (): void {
 
     expect(implode('', $this->output->getArrayCopy()))->toContain('pyhp lock')
         ->and(implode('', $this->output->getArrayCopy()))->toContain('--exact');
+});
+
+test('options also take their value as the next argument', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['six']]]]));
+    $runner = new FakeCommandRunner(programs: ['uv' => '/bin/uv']);
+
+    $code = ($this->app)($runner)->run(['setup', '--python', '3.13', '--venv', 'env', '--dry-run'], $this->root);
+
+    $venv = $this->root.DIRECTORY_SEPARATOR.'env';
+    expect($code)->toBe(0)
+        ->and($this->output->getArrayCopy())->toBe([
+            "> /bin/uv venv {$venv} --python 3.13".PHP_EOL,
+            '> /bin/uv pip install --python '.VirtualEnv::python($venv, 'Linux').' six'.PHP_EOL,
+            'Dry run: nothing was changed.'.PHP_EOL,
+        ]);
+});
+
+test('without --dry-run setup runs the commands, with it nothing runs', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['six']]]]));
+    $real = new FakeCommandRunner(programs: ['uv' => '/bin/uv']);
+    $dry = new FakeCommandRunner(programs: ['uv' => '/bin/uv']);
+
+    ($this->app)($real)->run(['setup'], $this->root);
+    ($this->app)($dry)->run(['setup', '--dry-run'], $this->root);
+
+    expect($real->ran)->not->toBe([])
+        ->and($dry->ran)->toBe([]);
+});
+
+test('a missing or empty option value says what to write', function (array $args, string $message): void {
+    $code = ($this->app)(new FakeCommandRunner)->run($args, $this->root);
+
+    expect($code)->toBe(2)
+        ->and($this->errors->getArrayCopy())->toBe(["pyhp: {$message}".PHP_EOL]);
+})->with([
+    'python at the end' => [['setup', '--python'], '--python needs a value, e.g. --python=3.12'],
+    'python followed by an option' => [['setup', '--python', '--dry-run'], '--python needs a value, e.g. --python=3.12'],
+    'empty python' => [['setup', '--python='], '--python needs a value, e.g. --python=3.12'],
+    'venv at the end' => [['lock', '--venv'], '--venv needs a value, e.g. --venv=.venv'],
+    'empty venv' => [['setup', '--venv='], '--venv needs a value, e.g. --venv=.venv'],
+]);
+
+test('errors are one line each on stderr, starting with pyhp:', function (): void {
+    file_put_contents($this->root.'/composer.json', '{');
+
+    $usage = ($this->app)(new FakeCommandRunner)->run(['install'], $this->root);
+    $failure = ($this->app)(new FakeCommandRunner)->run(['setup'], $this->root);
+
+    $errors = $this->errors->getArrayCopy();
+    expect($usage)->toBe(2)
+        ->and($failure)->toBe(1)
+        ->and($errors[0])->toBe('pyhp: Unknown command "install". Run "pyhp help" to see the commands.'.PHP_EOL)
+        ->and($errors[1])->toStartWith('pyhp: ')
+        ->and($errors[1])->toEndWith(PHP_EOL)
+        ->and(substr_count($errors[1], PHP_EOL))->toBe(1);
+});
+
+test('info without --json prints the text report', function (): void {
+    ($this->app)(new FakeCommandRunner)->run(['info'], $this->root);
+
+    expect(implode('', $this->output->getArrayCopy()))->toStartWith(PHP_EOL.'PyHP ');
 });

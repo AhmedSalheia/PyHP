@@ -70,3 +70,10 @@ test('the package names in a lock are read, ignoring comments, options and marke
 
     expect(LockFile::packageNames($lock))->toBe(['idna', 'six']);
 });
+
+test('the fingerprint is read from a lock checked out with Windows line endings', function (): void {
+    $lock = str_replace("\n", "\r\n", LockFile::withHeader("six==1.17.0\n", 'abc123', 'uv'));
+
+    expect(LockFile::fingerprintIn($lock))->toBe('abc123')
+        ->and(LockFile::packageNames($lock))->toBe(['six']);
+});
