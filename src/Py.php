@@ -8,6 +8,7 @@ use Closure;
 use PyHP\Exception\ProtocolException;
 use PyHP\Internal\Codec;
 use PyHP\Value\Dict;
+use PyHP\Value\NdArray;
 use PyHP\Value\Slice;
 use PyHP\Value\Tuple;
 use PyHP\Value\Vectorized;
@@ -198,6 +199,18 @@ final class Py
         return new Dict($items);
     }
 
+    /**
+     * A NumPy array for Python, sent as raw bytes instead of JSON (much faster
+     * for big arrays): Py::ndarray([[1.5, 2], [3, 4]]) or Py::ndarray($pixels, 'uint8').
+     * $data must be rectangular nested lists; dtype is one of NdArray::DTYPES.
+     *
+     * @param  array<array-key, mixed>  $data
+     */
+    public static function ndarray(array $data, string $dtype = 'float64'): NdArray
+    {
+        return new NdArray($data, $dtype);
+    }
+
     /** Python len(obj). */
     public static function len(PyObject $object): int
     {
@@ -245,8 +258,9 @@ final class Py
 
     /**
      * Copy the Python object into a PHP value, also accepting sets and subclasses
-     * of dict/list/str/int/float. Throws ConversionException if any part has no
-     * PHP equivalent, instead of returning nested proxies.
+     * of dict/list/str/int/float. NumPy arrays become nested PHP arrays, copied
+     * as raw bytes (fast even for millions of numbers). Throws ConversionException
+     * if any part has no PHP equivalent, instead of returning nested proxies.
      */
     public static function toPhp(PyObject $object): mixed
     {

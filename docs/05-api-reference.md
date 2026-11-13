@@ -18,11 +18,12 @@
 | `Py::slice($start, $stop = null, $step = null)` | A value sent as a Python `slice`: `Py::slice(1, 3)` is `1:3`, `Py::slice(null, null, -1)` is `::-1`. |
 | `Py::vectorize(Closure $callback, bool $elementwise = false, int $batchSize = 1000): Vectorized` | A PHP closure Python calls once per batch of values instead of once per value; use it with `->pipe()`. pandas Series keep their index and name. See [Speed](09-php-callbacks.md#pyvectorize-php-logic-a-round-trip-per-batch). |
 | `Py::dict(array $items)` | A value sent as a Python `dict`, even if the array is empty or list-shaped. |
+| `Py::ndarray(array $data, string $dtype = 'float64'): NdArray` | A value sent as a NumPy array, packed as raw bytes: much faster than JSON for big arrays. See [NumPy arrays](08-pandas-and-numpy.md#numpy-arrays). |
 | `Py::len(PyObject $o): int` | Python `len(o)`. |
 | `Py::repr(PyObject $o): string` | Python `repr(o)`. |
 | `Py::type(PyObject $o): string` | The Python type, e.g. `pandas.DataFrame`, `int`, `__pyhp__.Invoice`. |
 | `Py::ref(PyObject $o, string $attribute): PyObject` | A live proxy to an attribute instead of a copy, so you can change it in place: `Py::ref($doc, 'user_data')['k'] = 'v'`. |
-| `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets and subclasses of dict/list/str/int/float. Throws instead of returning nested proxies. |
+| `Py::toPhp(PyObject $o): mixed` | Copy the object into PHP, also accepting sets, subclasses of dict/list/str/int/float and NumPy arrays (copied as raw bytes). Throws instead of returning nested proxies. |
 | `Py::rows(PyObject $df): array` | A pandas DataFrame as a list of rows, fast and `json_encode()`-ready; see [Copying tables into PHP](08-pandas-and-numpy.md#copying-tables-into-php). |
 | `Py::columns(PyObject $df): array` | The same as one list per column: the most compact copy. |
 

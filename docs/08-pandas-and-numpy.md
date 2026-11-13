@@ -5,7 +5,7 @@
 ### The pattern
 
 1. **Load and transform inside Python**, through proxies or `exec()`.
-2. **Copy only the result** to PHP: `->to_dict()`, `->tolist()`, `->item()`, a scalar like `->sum()`, or a whole table with [`Py::rows($df)`](#copying-tables-into-php).
+2. **Copy only the result** to PHP: `->to_dict()`, `->item()`, a scalar like `->sum()`, a whole table with [`Py::rows($df)`](#copying-tables-into-php), or a whole array with [`Py::toPhp($array)`](#numpy-arrays).
 3. **Or don't copy at all**: write a file from Python (`->to_csv()`, `->to_parquet()`) and pass the path around.
 
 ```php
@@ -74,6 +74,44 @@ They differ from `to_dict()` on purpose, to give you data PHP can use directly:
 * Column names must be strings or integers that stay distinct as PHP array keys (`'1'` and `1` collide in PHP); otherwise you get a `ConversionException`. Rename first, e.g. flatten a MultiIndex.
 * A `Series` isn't accepted: use `$series->tolist()` or `Py::rows($series->to_frame())`.
 * Floats are exact (no rounding), unlike pandas' own `to_json()`.
+
+### NumPy arrays
+
+`Py::toPhp()` copies a NumPy array into nested PHP arrays. Arrays of numbers and bools travel as raw bytes instead of JSON, which is 3–10× faster than `->tolist()` for big arrays:
+
+```php
+$np = $py->import('numpy');
+$image = $np->random->rand(1000, 1000);
+
+$pixels = Py::toPhp($image);      // [[0.41, 0.07, ...], ...], 1000 rows of 1000 floats
+```
+
+`Py::ndarray()` goes the other way: it sends a PHP array as a NumPy array, packed as bytes in PHP:
+
+```php
+$model->predict(Py::ndarray($features));              // float64
+$py->vars->mask = Py::ndarray($bits, 'bool');
+$py->vars->img = Py::ndarray($rgbRows, 'uint8');
+```
+
+* The data must be rectangular lists: every row at the same depth has the same length, and keys are `0, 1, 2, ...` (use `array_values()` on other arrays).
+* `dtype` is one of `float64` (the default), `float32`, `int64`, `int32`, `int16`, `int8`, `uint32`, `uint16`, `uint8`, `bool`. Values must fit: ints in range for int types, ints or floats for float types, bools for `bool`. Anything else throws `ConversionException` saying what was expected.
+* Python gets an ordinary writable array.
+
+What `Py::toPhp()` makes of each kind of array:
+
+| NumPy array | PHP value |
+|---|---|
+| `float64`, `float32`, `float16`, `longdouble` | floats (`NAN`, `INF` included; `longdouble` is rounded to `float64`) |
+| `int8` … `int64`, `uint8` … `uint32` | ints |
+| `uint64` | ints, or `ConversionException` if a value is above `PHP_INT_MAX` |
+| `bool` | bools |
+| strings, objects | copied value by value, like a list (slower) |
+| complex, `datetime64`, `timedelta64` | `ConversionException`; convert first, e.g. `->astype('str')` |
+| 0-dimensional (`np.array(5)`) | the single value |
+| empty dimensions (`np.zeros((3, 0))`) | `[[], [], []]` |
+
+Arrays inside other values (`Py::toPhp($dict)` where the dict holds arrays) are copied the same way. Everywhere else, for example as the result of `eval()`, an array stays a proxy as before. Each array has to fit in `max_message_bytes` (64 MiB by default, about 8 million `float64` values); raise it for bigger arrays.
 
 ### Missing values and dates
 
