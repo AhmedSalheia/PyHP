@@ -64,4 +64,4 @@ Bug and security fixes go into the **latest minor release** of the current major
 
 ---
 
-← [Development](16-development.md) · [Contents](README.md)
+← [Development](16-development.md) · [Contents](README.md) · [Upgrading](18-upgrading.md) →

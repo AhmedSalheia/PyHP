@@ -1,6 +1,6 @@
 # PyHP documentation
 
-Read the files in order; each one builds on the previous ones.
+Read the files in order; each one builds on the previous ones. The same pages are on the website: https://pyhp-php.github.io/pyhp/
 
 1. [Introduction](01-introduction.md)
 2. [Installation](02-installation.md)
@@ -19,5 +19,6 @@ Read the files in order; each one builds on the previous ones.
 15. [How PyHP works inside](15-internals.md)
 16. [Development](16-development.md)
 17. [Versions and compatibility](17-compatibility.md)
+18. [Upgrading](18-upgrading.md)
 
 The plan for the next versions is in [`ROADMAP.md`](../ROADMAP.md).

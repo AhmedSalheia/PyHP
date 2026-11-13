@@ -39,9 +39,9 @@ Use these keys with `Py::config()`, `Py::session()` and `Config::fromArray()`. U
 | `timeout` | float\|null | `30` | Seconds **one call** may take. `null` = wait forever. On timeout the worker is killed (see [Errors](11-output-and-errors.md#errors)). |
 | `startup_timeout` | float | `10` | Seconds to wait for the worker to start and connect. |
 | `cwd` | string\|null | `null` (PHP's) | Working directory of the Python process. Relative paths *inside Python* resolve against it. |
-| `env` | array<string,string> | `[]` | Extra environment variables for Python. |
+| `env` | `array<string,string>` | `[]` | Extra environment variables for Python. |
 | `inherit_env` | bool | `true` | Start from PHP's environment (`true`) or from only `env` (`false`). On Windows `SYSTEMROOT` is always passed, because Python needs it. |
-| `paths` | list<string> | `[]` | Extra folders added to Python's `sys.path`, so your own modules can be imported. The working directory isn't importable by default; add it here if you need it. |
+| `paths` | `list<string>` | `[]` | Extra folders added to Python's `sys.path`, so your own modules can be imported. The working directory isn't importable by default; add it here if you need it. |
 | `output` | `OutputMode` or `'echo'`/`'capture'` | `Echo` | What happens to text Python prints. See [Printed output](11-output-and-errors.md#printed-output-and-the-log). |
 | `max_message_bytes` | int | 64 MiB | Largest request or result allowed. Protects PHP from accidentally copying huge data. Minimum 1024. |
 | `log_file` | string\|null | `null` (temp file) | Where the worker's stderr goes. A temp file is deleted when the session closes; set a path to keep it. |
