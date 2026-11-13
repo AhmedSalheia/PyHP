@@ -259,3 +259,96 @@ test('the lock file is reported as missing, up to date or out of date', function
         ->and($stale)->toBe(1)
         ->and(($this->text)())->toContain('out of date');
 });
+
+/** @return array<string, mixed> */
+function infoJson(string $text): array
+{
+    $data = json_decode($text, true, 32, JSON_THROW_ON_ERROR);
+    expect($data)->toBeArray();
+
+    return $data;
+}
+
+test('--json reports the same facts as one JSON document, and the same exit code', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['python' => '3.12', 'requirements' => ['pandas>=2']]]]));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(
+        programs: ['uv' => '/bin/uv'],
+        captures: [
+            infoProbe($python, ['pandas']) => probeAnswer(packages: ['pandas' => '3.1.1']),
+            '/bin/uv --version' => 'uv 0.9.5',
+        ],
+    );
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root, json: true);
+    $data = infoJson(($this->text)());
+
+    expect($code)->toBe(0)
+        ->and($data['format'])->toBe(1)
+        ->and($data['ok'])->toBeTrue()
+        ->and($data['problems'])->toBe([])
+        ->and($data['php']['version'])->toBe(PHP_VERSION)
+        ->and($data['php']['binary'])->toBe(PHP_BINARY)
+        ->and($data['php']['bits'])->toBe(PHP_INT_SIZE * 8)
+        ->and($data['php']['proc_open'])->toBeTrue()
+        ->and($data['project']['root'])->toBe($this->root)
+        ->and($data['project']['python'])->toBe('3.12')
+        ->and($data['project']['requirements'])->toBe([['spec' => 'pandas>=2', 'origin' => 'your project']])
+        ->and($data['project']['lock'])->toBe(['file' => null, 'status' => 'none', 'packages' => 0])
+        ->and($data['python']['interpreter'])->toBe($python)
+        ->and($data['python']['chosen_by'])->toBe('venv')
+        ->and($data['python']['venv'])->toBe(['path' => $this->root.DIRECTORY_SEPARATOR.'.venv', 'exists' => true])
+        ->and($data['python']['uv'])->toBe(['path' => '/bin/uv', 'version' => 'uv 0.9.5'])
+        ->and($data['python']['started'])->toBeTrue()
+        ->and($data['python']['version'])->toBe('3.12.7')
+        ->and($data['python']['implementation'])->toBe('CPython')
+        ->and($data['python']['executable'])->toBe('/somewhere/python')
+        ->and($data['python']['packages'])->toBe(['pandas' => '3.1.1'])
+        ->and($data['python']['worker']['ok'])->toBeTrue()
+        ->and($data['python']['worker']['error'])->toBeNull()
+        ->and($data['python']['worker']['ms'])->toBeInt();
+});
+
+test('--json lists problems, missing packages and a missing uv', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['pandas', 'numpy']]]]));
+    $python = PHP_OS_FAMILY === 'Windows' ? 'python' : 'python3';
+    $runner = new FakeCommandRunner(captures: [
+        infoProbe($python, ['pandas', 'numpy']) => probeAnswer(packages: ['pandas' => '3.1.1', 'numpy' => null]),
+    ]);
+
+    $code = (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root, json: true);
+    $data = infoJson(($this->text)());
+
+    expect($code)->toBe(1)
+        ->and($data['ok'])->toBeFalse()
+        ->and($data['python']['chosen_by'])->toBe('default')
+        ->and($data['python']['venv']['exists'])->toBeFalse()
+        ->and($data['python']['uv'])->toBeNull()
+        ->and($data['python']['packages'])->toBe(['pandas' => '3.1.1', 'numpy' => null])
+        ->and(implode("\n", $data['problems']))->toContain('Not installed: numpy');
+});
+
+test('--json says when Python could not be started and skips the worker', function (): void {
+    $python = ($this->venvPython)();
+
+    $code = (new InfoCommand(new FakeCommandRunner, $this->out, $this->workerOk))->run($this->root, json: true);
+    $data = infoJson(($this->text)());
+
+    expect($code)->toBe(1)
+        ->and($data['python']['interpreter'])->toBe($python)
+        ->and($data['python']['started'])->toBeFalse()
+        ->and($data['python'])->not->toHaveKey('version')
+        ->and($data['python'])->not->toHaveKey('worker');
+});
+
+test('--json reports a lock file that is out of date', function (): void {
+    file_put_contents($this->root.'/composer.json', json_encode(['extra' => ['pyhp' => ['requirements' => ['six']]]]));
+    file_put_contents($this->root.'/pyhp.lock', LockFile::withHeader("six==1.17.0\n", 'stale', 'uv'));
+    $python = ($this->venvPython)();
+    $runner = new FakeCommandRunner(captures: [infoProbe($python, ['six']) => probeAnswer(packages: ['six' => '1.17.0'])]);
+
+    (new InfoCommand($runner, $this->out, $this->workerOk))->run($this->root, json: true);
+    $data = infoJson(($this->text)());
+
+    expect($data['project']['lock'])->toBe(['file' => 'pyhp.lock', 'status' => 'out_of_date', 'packages' => 1]);
+});
