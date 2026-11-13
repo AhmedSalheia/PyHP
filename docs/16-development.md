@@ -87,7 +87,16 @@ mutmut run && mutmut results     # then `mutmut show <id>` for a survivor's chan
 
 Both are slow (tens of minutes), so CI runs them in a separate workflow, `.github/workflows/mutation.yml`. It runs every Monday and can be started from the Actions tab; GitHub only offers both once the file is on the default branch (`main`). To run it on any commit, push it to a branch named `mutation/...`, e.g. `git push github HEAD:mutation/check`. The report is in the run's summary and artifacts.
 
-Some survivors can't be killed and are fine to leave: changes that keep the same behaviour (reference ids counting up by 2 instead of 1, a performance cache turned off, type hints), Windows-only code when running on Linux, and the exact wording of a few internal error messages.
+Each side has a **minimum score**, and the workflow fails below it: **90%** for the PHP library (`pest --mutate --min=90`) and **85%** for the worker. A change that adds code without tests that would notice it breaking shows up there.
+
+Some survivors can't be killed and are fine to leave:
+
+* changes that keep the same behaviour (reference ids counting up by 2 instead of 1, a performance cache turned off, type hints, `(string)` casts that only satisfy PHPStan, `assert()` lines, which don't run in production);
+* constants and property defaults, which Pest reports as "uncovered" because coverage tools don't track declaration lines, even where tests check the values;
+* Windows-only code when the job runs on Linux;
+* the exact wording of a few internal error messages.
+
+Two kinds of tests exist mainly to pin behaviour that's easy to break unnoticed: the **golden output** tests (`InfoOutputTest`, `InstallerOutputTest`), which compare everything `pyhp info` and `pyhp setup` print with the expected text, and `WorkerStartupTest`, which uses `tests/php/fixtures/fake-worker/sitecustomize.py` to play a worker that crashes, hangs or answers the handshake wrongly. When you change the wording of the command line's output, update the golden tests with it.
 
 ### The public API list
 

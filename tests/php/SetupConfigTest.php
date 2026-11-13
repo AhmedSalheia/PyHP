@@ -96,6 +96,7 @@ test('invalid settings are rejected with a clear message', function (array $pyhp
     'ignore-packages with a bad name' => [['ignore-packages' => ['not a package']], 'extra.pyhp.ignore-packages'],
     'overrides not a list' => [['overrides' => 'numpy<2'], 'extra.pyhp.overrides'],
     'empty override' => [['overrides' => ['']], 'extra.pyhp.overrides'],
+    'empty ignore-packages entry' => [['ignore-packages' => ['']], 'extra.pyhp.ignore-packages'],
 ]);
 
 test('extra.pyhp must be an object', function (): void {

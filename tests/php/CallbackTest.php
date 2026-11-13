@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use PyHP\Exception\ConversionException;
+use PyHP\Exception\MessageTooLargeException;
 use PyHP\Exception\PythonException;
 use PyHP\Exception\SessionClosedException;
 use PyHP\Py;
@@ -210,3 +211,14 @@ test('pandas apply runs a PHP closure per value', function (): void {
     expect($names->apply(ucfirst(...))->tolist())->toBe(['Ahmed', 'Sam'])
         ->and($pd->Series([1, 2, 3])->pipe(fn (PyObject $s) => $s->mul(10))->tolist())->toBe([10, 20, 30]);
 })->skip(fn () => ! pythonHasModule('pandas'), 'pandas is not installed');
+
+test('a callback whose result is too large to send fails like an exception, and the session goes on', function (): void {
+    $py = testSession(['max_message_bytes' => 4096]);
+    $py->vars->big = fn (): string => str_repeat('x', 10_000);
+    $py->exec("from pyhp import PhpError\ndef caught(f):\n    try:\n        return f()\n    except PhpError as e:\n        return e.php_class");
+
+    expect(fn () => $py->eval('big()'))->toThrow(MessageTooLargeException::class, 'max_message_bytes')
+        ->and($py->functions->caught($py->vars->big))->toBe(MessageTooLargeException::class)
+        ->and($py->eval('1 + 1'))->toBe(2);
+    $py->close();
+});
