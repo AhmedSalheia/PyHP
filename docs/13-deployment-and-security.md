@@ -77,7 +77,9 @@ Shared sessions **share Python state between jobs**: a variable one job sets is 
 |---|---|
 | **Linux** | ✅ Tested in CI: PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, with pandas, NumPy, SymPy and spaCy. |
 | **Windows** | ✅ Tested in CI (PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, pandas and NumPy). It uses sockets instead of pipes (PHP can't wait on pipes with a timeout on Windows), no shell (an argument array goes to `proc_open`), `NUL` instead of `/dev/null`, and passes `SYSTEMROOT` through. |
-| **macOS** | ✅ Tested in CI (PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, pandas and NumPy). |
+| **macOS** | ✅ Tested in CI on Apple Silicon (PHP 8.2 and 8.5, Python 3.11, 3.14 and 3.15, pandas and NumPy). |
+| **Linux on ARM** (Graviton, Ampere, Raspberry Pi) | ✅ Tested in CI on 64-bit ARM, the same versions as x64 Linux, including `pyhp setup` with uv and pip. |
+| **Windows on ARM** | ⚠️ Tested in CI, but not yet a required check. PHP has no native ARM64 build for Windows, so it runs as x64 under Windows' emulation, next to a native ARM64 Python; PyHP only talks to Python over a socket, so the mix works. |
 | **32-bit PHP** | ❌ Not supported (PHP integers must be 64-bit). |
 | **Python < 3.11** | ❌ The worker stops at start-up and PHP throws `WorkerStartException` saying which version is needed. |
 
