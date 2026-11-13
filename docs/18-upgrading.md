@@ -11,6 +11,8 @@ composer require pyhp/pyhp:^1.0
 vendor/bin/pyhp setup
 ```
 
+To try a release candidate before 1.0.0 is out, ask for it by name: `composer require pyhp/pyhp:1.0.0-rc1`. Composer only installs release candidates when you do (or when the project's `minimum-stability` allows them).
+
 ### Changes that need a code change
 
 | What changed | What to do |

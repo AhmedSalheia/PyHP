@@ -8,6 +8,10 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 
 ## [@dev]
 
+## [1.0.0-rc1] - 2026-11-13
+
+The first release candidate for 1.0: the API is reviewed and frozen, and the [compatibility promise](docs/17-compatibility.md) applies from here on. Install it with `composer require pyhp/pyhp:1.0.0-rc1`; moving from 0.4 is described in [Upgrading](docs/18-upgrading.md).
+
 ### Added
 - The documentation website, https://pyhp-php.github.io/pyhp/: the pages in `docs/` with search, built with VitePress and published from `main` by a new workflow. See [Development](docs/16-development.md#the-documentation-website).
 - [Upgrading](docs/18-upgrading.md): what to change in your code when moving from 0.4 to 1.0.
@@ -16,7 +20,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - Tests that pin every error message the Python worker writes word for word (`tests/python/test_messages.py`): malformed requests, values that can't be decoded or copied into PHP, callback misuse, oversized frames and the start-up messages in the log. PHP shows these messages to developers, so a change to one should be deliberate; the worker's mutation score goes from 85.9% to 91.6%. And tests for the last real PHP gaps (`tests/php/SetupEdgesTest.php`): a too-old Python found before a suitable one, `pyhp lock` without uv (its message, its failure explanation), odd `pip list` entries, half-valid answers from the Python probe in `pyhp info`, the worker check's timing and the lock in `pyhp info --json` (PHP mutation score 93.00% to 93.55%).
 - Minimum mutation scores: the mutation workflow fails below 90% for the PHP library and 85% for the Python worker, and installs the same Python packages as CI so no test is skipped.
 - A Docker base image for PyHP apps, `ghcr.io/pyhp-php/pyhp`: PHP 8.5 with Python 3.13, uv and Composer, in `cli` and `fpm` variants for amd64 and arm64. CI builds it on pull requests and runs the `pyhp setup` smoke tests inside it; it's published from `main` and rebuilt weekly for security updates. See [Deployment](docs/13-deployment-and-security.md#docker).
-- CI runs on ARM: the worker and the PHP library on Linux on ARM (`ubuntu-24.04-arm`) as required checks, plus the `pyhp setup` smoke tests there; Windows on ARM (`windows-11-arm`, with x64 PHP under emulation, as users run it) as a non-blocking job for now. macOS was already Apple Silicon.
+- CI runs on ARM: the worker and the PHP library on Linux on ARM (`ubuntu-24.04-arm`) as required checks, plus the `pyhp setup` smoke tests there; Windows on ARM (`windows-11-arm`, with x64 PHP under emulation, as users run it) as a required check too. macOS was already Apple Silicon.
 - `pyhp info --json`: the same report as one JSON document (`format: 1`) for scripts, CI and support tools, with the same exit code. Its fields are covered by the compatibility promise: new ones can be added, existing ones keep their meaning. See [The pyhp command](docs/03-command-line.md#pyhp-info---json).
 - Mutation testing: `composer mutate` (Pest's built-in `--mutate`) for the PHP library and `mutmut` for the Python worker, configured in `composer.json` and `pyproject.toml`, and a `Mutation testing` workflow that runs both every Monday or on demand. A first run on the worker killed 74% of the mutants; 73 new tests for exact limits (64-bit integers, nesting depth, frame and authentication sizes, output chunks), callback counters and error messages raise that to 86% (869 of 1,012; most of the rest change behaviour in no observable way, or only an error message's wording). See [Development](docs/16-development.md#mutation-testing).
 - The wire protocol is documented frame by frame in [How PyHP works inside](docs/15-internals.md#the-wire-protocol-frame-by-frame): start-up, the handshake, every operation with its fields and result, error kinds, callback and output frames, value tags and the version history. A test fails when the worker gains an operation or value tag the reference doesn't describe.
@@ -29,7 +33,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 - On Windows the worker's port is bound exclusively, so no other process can share it; a connection that doesn't authenticate is dropped after 2 seconds instead of 5.
 - The security docs explain that names (functions, classes, modules, attributes, `execFile()` paths) are code and must never come from user input, and that Python errors shouldn't be shown to visitors. The full review is in `docs/tasks/v1-security-review.md`.
 - **Breaking:** PyHP needs Python 3.11 or newer. Python 3.10 reached its end of life in October 2026. On 3.10 the worker now stops at start-up and PHP throws `WorkerStartException` naming the version needed, and `pyhp setup` refuses it. *Upgrade:* point PyHP at Python 3.11 or newer (`pyhp setup --python=3.13`, or the `python` option).
-- CI tests the oldest and newest supported versions: the worker on Python 3.11 and 3.15; the PHP library on PHP 8.2 with Python 3.11 and PHP 8.5 with Python 3.14, on Linux, Windows and macOS. A PHP 8.6 job runs on Linux as an early warning and can't fail the build. The setup smoke tests use PHP 8.5.
+- CI tests the oldest and newest supported versions: the worker on Python 3.11 and 3.15; the PHP library on PHP 8.2 with Python 3.11 and PHP 8.5 with Python 3.14, on Linux, Windows and macOS. A PHP 8.6 job runs on Linux as well, so a break shows up before users upgrade; like every job, it has to pass. The setup smoke tests use PHP 8.5.
 - Marked as internal (`@internal`), outside the compatibility promise: every class in `PyHP\Setup` and `PyHP\Console` (use `vendor/bin/pyhp` instead), `Config::locatePython()` (use `Config::detectPython()`), `Value\Vectorized::$callback` and `StaleProxyException::restarted()`. `PyObject`'s constructor was meant to be internal already; its marker now actually applies.
 - Python side: `PhpError.error_id` and `PhpCallable.callback_id` are now `_error_id` and `_callback_id`; they are protocol details. `pyhp.PhpError` (`php_class`, `php_message`) and `pyhp.PhpCallable` stay public.
 - **Breaking:** `Py::shared()` needs a name: `Py::shared('reports', ...)`. Without one it gave a session called "default" that wasn't `Py::default()`. *Upgrade:* pass the name you want; `Py::shared('default')` behaves as before.
@@ -132,7 +136,8 @@ First public release.
 - CI on Linux, Windows and macOS with PHP 8.2 / 8.4 and Python 3.10 / 3.13: Pest (80% coverage gate), PHPStan max, Pint, pytest, mypy --strict, ruff.
 - SymPy and spaCy suites on Linux; pandas and NumPy on all three systems.
 
-[@dev]: https://github.com/pyhp-php/pyhp/compare/v0.4.0...develop
+[@dev]: https://github.com/pyhp-php/pyhp/compare/v1.0.0-rc1...develop
+[1.0.0-rc1]: https://github.com/pyhp-php/pyhp/compare/v0.4.0...v1.0.0-rc1
 [0.4.0]: https://github.com/pyhp-php/pyhp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/pyhp-php/pyhp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/pyhp-php/pyhp/compare/v0.1.1...v0.2.0

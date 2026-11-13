@@ -9,7 +9,7 @@ Goal: make Python's libraries (data analysis, science, NLP, machine learning, an
 | 3 | Tooling | v0.2.0 | released 2026-11-07 | `pyhp setup` (uv or venv/pip), `pyhp info`, automatic `.venv` detection, `Py::ref()`, examples 06–11, numbered docs. |
 | 4 | Ecosystem and data fidelity | v0.3.0 | released 2026-11-08 | Python requirements declared by any Composer package, exact environments, lossless numbers, real-world setup tests. |
 | 5 | Long-running PHP | v0.4.0 | released 2026-11-09 | Worker recovery, shared sessions for queue workers and app servers, live output, faster callbacks. |
-| 6 | Stable | v1.0.0 | in progress | Reviewed and frozen public API and protocol, a written compatibility promise, quality bars, a docs website; release candidates first. |
+| 6 | Stable | v1.0.0 | releasing: v1.0.0-rc1 2026-11-13 | Reviewed and frozen public API and protocol, a written compatibility promise, quality bars, a docs website; release candidates first. |
 | 7 | Laravel | pyhp/laravel v0.1.0 | planned (after 1.0) | A separate package built on a stable PyHP: service provider, config, facade, artisan commands. |
 
 ## v0.3.0: Ecosystem and data fidelity
