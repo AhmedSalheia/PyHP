@@ -1,5 +1,5 @@
 ---
-# The home page of the documentation website (https://pyhp-php.github.io/pyhp/).
+# The home page of the documentation website (https://pyhp-php.github.io/PyHP/).
 # On GitHub, start with README.md in this folder instead.
 layout: home
 

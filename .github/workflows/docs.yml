@@ -1,7 +1,7 @@
 name: Docs website
 
 # Builds the documentation website (VitePress, from docs/) and publishes it to
-# GitHub Pages: https://pyhp-php.github.io/pyhp/. Pull requests only build it, so
+# GitHub Pages: https://pyhp-php.github.io/PyHP/. Pull requests only build it, so
 # broken pages and dead links fail before merging; main publishes, so the site
 # matches the latest release. Run it by hand for the first publish.
 on:
@@ -33,7 +33,14 @@ jobs:
           cache: npm
           cache-dependency-path: docs/package-lock.json
       - run: npm ci
+      # The path Pages serves the site under ("/PyHP", from the repository's name;
+      # case-sensitive), so the CSS and JS links match it. Pull requests use the default.
+      - id: pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
       - run: npm run build
+        env:
+          DOCS_BASE: ${{ steps.pages.outputs.base_path && format('{0}/', steps.pages.outputs.base_path) || '' }}
       - uses: actions/upload-pages-artifact@v4
         if: github.event_name != 'pull_request'
         with:

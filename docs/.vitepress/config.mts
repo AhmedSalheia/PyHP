@@ -23,7 +23,9 @@ const chapters = readdirSync(docs)
 export default defineConfig({
   title: 'PyHP',
   description: 'Use Python libraries from PHP: pandas, NumPy, scikit-learn and the rest, through proxies.',
-  base: '/pyhp/',
+  // GitHub Pages serves the site under the repository's name, and that path is
+  // case-sensitive (PyHP, not pyhp). CI passes the exact path Pages reports.
+  base: process.env.DOCS_BASE || '/PyHP/',
   cleanUrls: true,
   srcExclude: ['README.md', 'tasks/**'],
   rewrites: Object.fromEntries(chapters.map(({ file, slug }) => [file, `${slug}.md`])),

@@ -9,6 +9,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 ## [@dev]
 
 ### Fixed
+- The documentation website loads its styles and scripts: it was built for `/pyhp/`, but GitHub Pages serves it at `/PyHP/` (the repository's name, case-sensitive). CI now builds it for the path Pages reports.
 - A test of `pyhp info`'s worker timing no longer fails on Windows runners, where `usleep()` can return a timer tick early (it measured 47 ms for a 60 ms sleep). Tests only; PyHP itself is unchanged.
 
 ## [1.0.0-rc1] - 2026-11-13
@@ -16,7 +17,7 @@ Every change is added under **[@dev]** as soon as it's made; when a version is r
 The first release candidate for 1.0: the API is reviewed and frozen, and the [compatibility promise](docs/17-compatibility.md) applies from here on. Install it with `composer require pyhp/pyhp:1.0.0-rc1`; moving from 0.4 is described in [Upgrading](docs/18-upgrading.md).
 
 ### Added
-- The documentation website, https://pyhp-php.github.io/pyhp/: the pages in `docs/` with search, built with VitePress and published from `main` by a new workflow. See [Development](docs/16-development.md#the-documentation-website).
+- The documentation website, https://pyhp-php.github.io/PyHP/: the pages in `docs/` with search, built with VitePress and published from `main` by a new workflow. See [Development](docs/16-development.md#the-documentation-website).
 - [Upgrading](docs/18-upgrading.md): what to change in your code when moving from 0.4 to 1.0.
 - Fast NumPy transfer: `Py::toPhp()` now copies NumPy arrays (it refused them before) as raw bytes instead of JSON, 3–10× faster than `->tolist()` (1,000,000 floats: ~72 ms instead of ~740 ms). `Py::ndarray($data, $dtype)` sends a PHP array to Python as a NumPy array the same way, about 7× faster than sending JSON and calling `np.array()`. Numeric and bool arrays travel as bytes; string and object arrays are copied value by value. See [NumPy arrays](docs/08-pandas-and-numpy.md#numpy-arrays) and `benchmarks/numpy-transfer.php`.
 - Tests for the gaps the first PHP mutation run found (82% of 2,714 mutants caught): golden output tests that pin everything `pyhp info` (text and `--json`) and `pyhp setup`/`pyhp lock` print; worker start-up failures (a worker that crashes, hangs or answers the handshake wrongly, played by a fake worker); an oversized callback reply; command-line option forms; odd `installed.json` entries; a lock file with Windows line endings. See `docs/tasks/v1-mutation-report.md`.
