@@ -85,7 +85,7 @@ pip install "mutmut<3"           # the Python worker (mutmut 3 can't handle the 
 mutmut run && mutmut results     # then `mutmut show <id>` for a survivor's change
 ```
 
-Both are slow (tens of minutes), so CI runs them in a separate workflow, `.github/workflows/mutation.yml`: start it from the Actions tab, and it also runs every Monday. The report is in the run's summary and artifacts.
+Both are slow (tens of minutes), so CI runs them in a separate workflow, `.github/workflows/mutation.yml`. It runs every Monday and can be started from the Actions tab; GitHub only offers both once the file is on the default branch (`main`). To run it on any commit, push it to a branch named `mutation/...`, e.g. `git push github HEAD:mutation/check`. The report is in the run's summary and artifacts.
 
 Some survivors can't be killed and are fine to leave: changes that keep the same behaviour (reference ids counting up by 2 instead of 1, a performance cache turned off, type hints), Windows-only code when running on Linux, and the exact wording of a few internal error messages.
 

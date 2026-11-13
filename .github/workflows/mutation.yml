@@ -1,8 +1,13 @@
 name: Mutation testing
 
-# Slow (tens of minutes), so it doesn't run on every push: start it from the
-# Actions tab ("Run workflow"), and it runs by itself every Monday.
+# Slow (tens of minutes), so it doesn't run on every push. Three ways to start it:
+# - push a branch named mutation/<anything>: runs on that commit, from any branch
+#   (handy before a merge, and the only way before the file is on main);
+# - the Actions tab ("Run workflow"), once this file is on the default branch;
+# - by itself every Monday (also needs the file on the default branch).
 on:
+  push:
+    branches: ["mutation/**"]
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * 1"
